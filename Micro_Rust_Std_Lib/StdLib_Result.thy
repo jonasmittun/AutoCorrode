@@ -153,6 +153,28 @@ lemma ok_spec [crush_specs]:
   apply crush_base
   done
 
+definition err :: \<open>('v, 'e) result \<Rightarrow> ('s, 'e option, 'abort, 'i, 'o) function_body\<close> where
+  \<open>err self \<equiv> FunctionBody \<lbrakk>
+     match self {
+       Ok(r) \<Rightarrow> None,
+       Err(e) \<Rightarrow> Some(e)
+     }
+   \<rbrakk>\<close>
+
+definition err_contract ::  \<open>('v, 'e) result \<Rightarrow> ('s::{sepalg}, 'e option, 'abort) function_contract\<close> where
+  [crush_contracts]: \<open>err_contract res \<equiv>
+    let pre  = UNIV;
+        post = \<lambda>r. \<langle>r = (case res of Ok(_) \<Rightarrow> None | Err(k) \<Rightarrow> Some k)\<rangle>
+    in make_function_contract pre post\<close>
+ucincl_auto err_contract
+
+lemma err_spec [crush_specs]:
+  shows \<open>\<Gamma>; err res \<Turnstile>\<^sub>F err_contract res\<close>
+  apply (crush_boot f: err_def contract: err_contract_def)
+  apply (cases res)
+  apply crush_base
+  done
+
 definition result_unwrap_or :: \<open>('a, 'b) result \<Rightarrow> 'a \<Rightarrow> ('machine, 'a, 'abort, 'i prompt, 'o prompt_output) function_body\<close> where
   \<open>result_unwrap_or res e \<equiv> FunctionBody \<lbrakk>
      if let Ok(r) = res {
