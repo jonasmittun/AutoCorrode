@@ -184,6 +184,20 @@ definition result_unwrap_or :: \<open>('a, 'b) result \<Rightarrow> 'a \<Rightar
      }
    \<rbrakk>\<close>
 
+definition result_unwrap_or_contract ::  \<open>('a, 'b) result \<Rightarrow> 'a \<Rightarrow> ('s::{sepalg}, 'a, 'abort) function_contract\<close> where
+  [crush_contracts]: \<open>result_unwrap_or_contract res e \<equiv>
+    let pre  = UNIV;
+        post = \<lambda>r. \<langle>r = (case res of Ok(v) \<Rightarrow> v | Err(_) \<Rightarrow> e)\<rangle>
+    in make_function_contract pre post\<close>
+ucincl_auto result_unwrap_or_contract
+
+lemma result_unwrap_or_spec [crush_specs]:
+  shows \<open>\<Gamma>; result_unwrap_or res e \<Turnstile>\<^sub>F result_unwrap_or_contract res e\<close>
+  apply (crush_boot f: result_unwrap_or_def contract: result_unwrap_or_contract_def)
+  apply (cases res)
+  apply crush_base
+  done
+
 context reference
 begin       
 adhoc_overloading store_update_const \<rightleftharpoons> update_fun
