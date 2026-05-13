@@ -128,7 +128,7 @@ begin
 adhoc_overloading store_update_const \<rightleftharpoons> update_fun
 
 definition option_as_mut ::
-  \<open>('a, 'b, 'v option) Global_Store.ref \<Rightarrow> ('s, ('a, 'b, 'v) Global_Store.ref option, 'abort, 'i prompt, 'o prompt_output) function_body\<close> where
+  \<open>('a, 'b, 'v option) ref \<Rightarrow> ('s, ('a, 'b, 'v) ref option, 'abort, 'i prompt, 'o prompt_output) function_body\<close> where
   \<open>option_as_mut self \<equiv> FunctionBody \<lbrakk>
     if (*self).is_some() {
       Some (\<llangle>focus_option self\<rrangle>)
@@ -136,8 +136,8 @@ definition option_as_mut ::
       None
     }\<rbrakk>\<close>
 
-definition option_as_mut_contract :: \<open>'b \<Rightarrow> ('a, 'b, 'v option) Global_Store.ref \<Rightarrow> 'v option \<Rightarrow>
-    ('s::{sepalg}, ('a, 'b, 'v) Global_Store.ref option, 'abort) function_contract\<close> where
+definition option_as_mut_contract :: \<open>'b \<Rightarrow> ('a, 'b, 'v option) ref \<Rightarrow> 'v option \<Rightarrow>
+    ('s::{sepalg}, ('a, 'b, 'v) ref option, 'abort) function_contract\<close> where
   [crush_contracts]: \<open>option_as_mut_contract g ref opt \<equiv>
     let pre  = ref \<mapsto>\<langle>\<top>\<rangle> g\<down>opt;
         post = \<lambda>res. ref \<mapsto>\<langle>\<top>\<rangle> g\<down>opt \<star> \<langle>res = 
@@ -151,7 +151,7 @@ lemma option_as_mut_spec [crush_specs]:
   apply (crush_base simp add: option_focus_def split: option.splits)
   done
 
-definition take_mut_ref_option :: \<open>('a, 'b, 'v option) Global_Store.ref \<Rightarrow>
+definition take_mut_ref_option :: \<open>('a, 'b, 'v option) ref \<Rightarrow>
       ('s, 'v option, 'abort, 'i prompt, 'o prompt_output) function_body\<close> where
   \<open>take_mut_ref_option ptr \<equiv> FunctionBody \<lbrakk>
     let val = *ptr;
@@ -161,7 +161,7 @@ definition take_mut_ref_option :: \<open>('a, 'b, 'v option) Global_Store.ref \<
 adhoc_overloading take_const \<rightleftharpoons>
   take_mut_ref_option
 
-definition take_mut_ref_option_contract :: \<open>('a, 'b, 'v option) Global_Store.ref \<Rightarrow> 'b \<Rightarrow> 'v option \<Rightarrow>
+definition take_mut_ref_option_contract :: \<open>('a, 'b, 'v option) ref \<Rightarrow> 'b \<Rightarrow> 'v option \<Rightarrow>
     ('s::{sepalg}, 'v option, 'abort) function_contract\<close> where
   [crush_contracts]: \<open>take_mut_ref_option_contract ptr g v \<equiv>
     let pre = ptr \<mapsto>\<langle>\<top>\<rangle> g\<down>v;
@@ -176,6 +176,63 @@ lemma take_mut_ref_option_spec[crush_specs]:
   done
 
 no_adhoc_overloading store_update_const \<rightleftharpoons> update_fun
+
+definition option_map :: \<open>'v option \<Rightarrow>('v \<Rightarrow> ('s, 'w, 'abort, 'i prompt, 'o prompt_output) function_body) \<Rightarrow>
+    ('s, 'w option, 'abort, 'i prompt, 'o prompt_output) function_body\<close> where 
+  \<open>option_map self f \<equiv> FunctionBody \<lbrakk>
+     match self {
+        Some(v) \<Rightarrow> Some(f(v)),
+        None \<Rightarrow> None
+      }
+  \<rbrakk>\<close>
+
+definition option_map_pure :: \<open>'a option \<Rightarrow> ('a \<Rightarrow> 'b) \<Rightarrow> 'b option\<close> where
+  \<open>option_map_pure opt f \<equiv> case opt of Some v \<Rightarrow> Some (f v) | None \<Rightarrow> None\<close>
+
+lemma option_map_simps [simp]:
+  shows \<open>option_map_pure (Some v) f = (Some (f v))\<close>
+    and \<open>option_map_pure None     f = None\<close>
+  by (auto simp add: option_map_pure_def)
+
+(*
+The pattern is:
+
+ 1. The precondition asserts that the Rust closure f_rust refines the pure function f_pure (only needs to hold for 
+the value inside Some)
+ 2. The postcondition equates the result to applying the pure function via option_map_pure
+*)
+definition option_map_contract :: \<open>'a option \<Rightarrow> ('a \<Rightarrow> 'b) \<Rightarrow>
+     ('s::sepalg, 'abort, 'i, 'o) striple_context \<Rightarrow>
+     ('a \<Rightarrow> ('s, 'b, 'abort, 'i prompt, 'o prompt_output) function_body) \<Rightarrow>
+     ('s, 'b option, 'abort) function_contract\<close> where [crush_contracts]:
+   \<open>option_map_contract opt f_pure \<Gamma> f_rust \<equiv>
+     let pre  = \<langle>\<forall>v. opt = Some v \<longrightarrow> \<Gamma>; f_rust v \<Turnstile>\<^sub>F lift_pure_to_contract (f_pure v)\<rangle>;
+         post = \<lambda>r. \<langle>r = option_map_pure opt f_pure\<rangle>
+     in make_function_contract pre post\<close>
+ucincl_auto option_map_contract
+
+lemma option_map_spec:
+  shows \<open>\<Gamma>; option_map opt f_rust \<Turnstile>\<^sub>F option_map_contract opt f_pure \<Gamma> f_rust\<close>
+proof (crush_boot f: option_map_def contract: option_map_contract_def, goal_cases)
+  case 1
+  note f_spec = this[THEN spec]
+   show ?case proof (cases opt)
+     case None
+     then show ?thesis by crush_base
+   next
+     case (Some v)
+      have f_v: \<open>\<Gamma>; f_rust v \<Turnstile>\<^sub>F lift_pure_to_contract (f_pure v)\<close>
+        using f_spec[of v] Some by simp
+      have f_v_some: \<open>\<Gamma>; f_rust v \<Turnstile>\<^sub>F make_function_contract \<top> (\<lambda>r. \<langle>r = f_pure v\<rangle>)\<close>
+        using f_v by (simp add: lift_pure_to_contract_def)
+      show ?thesis
+        apply (simp add: Some option_map_pure_def)
+        apply (crush_base specs add: f_v_some)
+        done
+   qed
+qed
+
+
 
 (*<*)
 end
