@@ -177,6 +177,40 @@ lemma take_mut_ref_option_spec[crush_specs]:
 
 no_adhoc_overloading store_update_const \<rightleftharpoons> update_fun
 
+definition option_zip :: \<open>'a option \<Rightarrow> 'b option \<Rightarrow> ('s, ('a \<times> 'b \<times> tnil) option, 'abort, 'i prompt, 'o prompt_output) function_body\<close> where
+  \<open>option_zip self other \<equiv> FunctionBody \<lbrakk>
+   match self {
+    Some(a) \<Rightarrow> match other {
+        Some(b) \<Rightarrow> Some((a, b)),
+        None \<Rightarrow> None
+      },
+    None \<Rightarrow> None
+  }\<rbrakk>\<close>
+
+definition option_zip_pure :: \<open>'a option \<Rightarrow> 'b option \<Rightarrow> ('a \<times> 'b \<times> tnil) option\<close> where
+   \<open>option_zip_pure a b \<equiv> case a of None \<Rightarrow> None 
+     | Some x \<Rightarrow> (case b of None \<Rightarrow> None | Some y \<Rightarrow> Some (x, y, TNil))\<close>
+ 
+ lemma option_zip_pure_simps [simp]:
+   shows \<open>option_zip_pure None b = None\<close>
+     and \<open>option_zip_pure (Some x) None = None\<close>
+     and \<open>option_zip_pure (Some x) (Some y) = Some (x, y, TNil)\<close>
+   by (auto simp add: option_zip_pure_def)
+ 
+definition option_zip_contract :: \<open>'a option \<Rightarrow> 'b option \<Rightarrow>
+     ('s::sepalg, ('a \<times> 'b \<times> tnil) option, 'abort) function_contract\<close> where
+   [crush_contracts]: \<open>option_zip_contract a b \<equiv>
+     let pre = UNIV;
+         post = \<lambda>r. \<langle>r = option_zip_pure a b\<rangle>
+     in make_function_contract pre post\<close>
+ucincl_auto option_zip_contract
+ 
+lemma option_zip_spec [crush_specs]:
+   shows \<open>\<Gamma>; option_zip a b \<Turnstile>\<^sub>F option_zip_contract a b\<close>
+  apply (crush_boot f: option_zip_def contract: option_zip_contract_def)
+  apply (crush_base split!: option.splits)
+  done
+
 definition option_map :: \<open>'v option \<Rightarrow>('v \<Rightarrow> ('s, 'w, 'abort, 'i prompt, 'o prompt_output) function_body) \<Rightarrow>
     ('s, 'w option, 'abort, 'i prompt, 'o prompt_output) function_body\<close> where 
   \<open>option_map self f \<equiv> FunctionBody \<lbrakk>
@@ -230,7 +264,7 @@ proof (crush_boot f: option_map_def contract: option_map_contract_def, goal_case
         apply (crush_base specs add: f_v_some)
         done
    qed
-qed
+ qed
 
 
 
