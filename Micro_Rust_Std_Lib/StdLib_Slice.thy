@@ -44,6 +44,8 @@ lemma array_index_spec [crush_specs]:
   shows \<open>\<Gamma> ; array_index lst idx \<Turnstile>\<^sub>F array_index_contract lst idx\<close>
   by (crush_boot f: array_index_def contract: array_index_contract_def) crush_base
 
+consts slice_len_const :: \<open>'a \<Rightarrow> ('s, nat, 'abort, 'i, 'o) function_body\<close>
+
 context reference begin
 
 adhoc_overloading store_update_const \<rightleftharpoons> update_fun
@@ -234,6 +236,11 @@ lemma slice_len_spec_vector [crush_specs]:
   apply (crush_boot f: slice_len_vector_def contract: slice_len_contract_vector_def)
   apply crush_base
   done
+
+adhoc_overloading slice_len_const \<rightleftharpoons>
+  slice_len
+  slice_len_array
+  slice_len_vector
 
 adhoc_overloading index_const \<rightleftharpoons>
   slice_index

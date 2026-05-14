@@ -217,6 +217,68 @@ In this case, the automation requires one extra simplification rule to be able t
   done
 qed
 
+section\<open>Slice len tests\<close>
+
+text\<open>Test that \<^term>\<open>slice_len\<close> (for lists) can be called and its specification composed.\<close>
+definition len_list_test :: \<open>('addr, 'gv, nat list) Global_Store.ref \<Rightarrow>
+    ('s, nat, 'abort, 'i prompt, 'o prompt_output) function_body\<close> where
+  \<open>len_list_test xs \<equiv> FunctionBody \<lbrakk>
+    slice_len(xs)
+  \<rbrakk>\<close>
+
+definition len_list_test_contract :: \<open>(('addr, 'gv) gref, 'gv, nat list) focused \<Rightarrow> 'gv \<Rightarrow> nat list \<Rightarrow>
+    share \<Rightarrow> ('s, nat, 'abort) function_contract\<close> where
+  \<open>len_list_test_contract ptr g ls sh \<equiv>
+    let pre  = ptr \<mapsto>\<langle>sh\<rangle> g\<down>ls in
+    let post = \<lambda>r. ptr \<mapsto>\<langle>sh\<rangle> g\<down>ls \<star> \<langle>r = length ls\<rangle> in
+    make_function_contract pre post\<close>
+ucincl_auto len_list_test_contract
+
+lemma len_list_test_spec:
+  shows \<open>\<Gamma>; len_list_test ptr \<Turnstile>\<^sub>F len_list_test_contract ptr g ls sh\<close>
+  apply (crush_boot f: len_list_test_def contract: len_list_test_contract_def)
+  by crush_base
+
+text\<open>Test that \<^term>\<open>slice_len_array\<close> can be called and its specification composed.\<close>
+definition len_array_test :: \<open>('addr, 'gv, (nat, 'l::{len}) array) Global_Store.ref \<Rightarrow>
+    ('s, nat, 'abort, 'i prompt, 'o prompt_output) function_body\<close> where
+  \<open>len_array_test xs \<equiv> FunctionBody \<lbrakk>
+    slice_len_array(xs)
+  \<rbrakk>\<close>
+
+definition len_array_test_contract :: \<open>(('addr, 'gv) gref, 'gv, (nat, 'l::{len}) array) focused \<Rightarrow> 'gv \<Rightarrow>
+    (nat, 'l) array \<Rightarrow> share \<Rightarrow> ('s, nat, 'abort) function_contract\<close> where
+  \<open>len_array_test_contract ptr g arr sh \<equiv>
+    let pre  = ptr \<mapsto>\<langle>sh\<rangle> g\<down>arr in
+    let post = \<lambda>r. ptr \<mapsto>\<langle>sh\<rangle> g\<down>arr \<star> \<langle>r = LENGTH('l)\<rangle> in
+    make_function_contract pre post\<close>
+ucincl_auto len_array_test_contract
+
+lemma len_array_test_spec:
+  shows \<open>\<Gamma>; len_array_test ptr \<Turnstile>\<^sub>F len_array_test_contract ptr g (arr :: (nat, 'l::{len}) array) sh\<close>
+  apply (crush_boot f: len_array_test_def contract: len_array_test_contract_def)
+  by crush_base
+
+text\<open>Test that \<^term>\<open>slice_len_vector\<close> can be called and its specification composed.\<close>
+definition len_vector_test :: \<open>('addr, 'gv, (nat, 'l::{len}) vector) Global_Store.ref \<Rightarrow>
+    ('s, nat, 'abort, 'i prompt, 'o prompt_output) function_body\<close> where
+  \<open>len_vector_test xs \<equiv> FunctionBody \<lbrakk>
+    slice_len_vector(xs)
+  \<rbrakk>\<close>
+
+definition len_vector_test_contract :: \<open>(('addr, 'gv) gref, 'gv, (nat, 'l::{len}) vector) focused \<Rightarrow> 'gv \<Rightarrow>
+    (nat, 'l) vector \<Rightarrow> share \<Rightarrow> ('s, nat, 'abort) function_contract\<close> where
+  \<open>len_vector_test_contract ptr g vec sh \<equiv>
+    let pre  = ptr \<mapsto>\<langle>sh\<rangle> g\<down>vec in
+    let post = \<lambda>r. ptr \<mapsto>\<langle>sh\<rangle> g\<down>vec \<star> \<langle>r = vector_len vec\<rangle> in
+    make_function_contract pre post\<close>
+ucincl_auto len_vector_test_contract
+
+lemma len_vector_test_spec:
+  shows \<open>\<Gamma>; len_vector_test ptr \<Turnstile>\<^sub>F len_vector_test_contract ptr g vec sh\<close>
+  apply (crush_boot f: len_vector_test_def contract: len_vector_test_contract_def)
+  by crush_base
+
 section\<open>Further reading\<close>
 text\<open>This file did not further discuss the \<^verbatim>\<open>locale\<close>/\<^verbatim>\<open>context\<close> incantations
 at the start of the file. To learn more about that, see \<^file>\<open>Reference_Examples.thy\<close>.
