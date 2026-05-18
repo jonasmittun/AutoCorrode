@@ -13,6 +13,28 @@ based on documentation at https://doc.rust-lang.org/std/result/enum.Result.html\
 
 subsection\<open>and\<close>
 
+text\<open>Returns second argument if first \<^verbatim>\<open>Result\<close> is of constructor \<^verbatim>\<open>Ok\<close>,
+ otherwise returns \<^verbatim>\<open>Err\<close> value of first argument.\<close>
+
+definition result_and :: \<open>('v, 'e) result \<Rightarrow> ('v, 'e) result \<Rightarrow> ('s, ('v, 'e) result, 'abort, 'i, 'o) function_body\<close> where
+  \<open>result_and self res \<equiv> FunctionBody \<lbrakk>
+     match self {
+       Ok(_) \<Rightarrow> res,
+       Err(e) \<Rightarrow> Err(e)
+     }
+   \<rbrakk>\<close>
+
+definition result_and_contract ::  \<open>('v, 'e) result \<Rightarrow> ('v, 'e) result \<Rightarrow> ('s::{sepalg}, ('v, 'e) result, 'abort) function_contract\<close> where
+  [crush_contracts]: \<open>result_and_contract self res \<equiv>
+    let pre  = UNIV;
+        post = \<lambda>r. \<langle>r = (case self of Ok(_) \<Rightarrow> res | Err(k) \<Rightarrow> Err(k))\<rangle>
+    in make_function_contract pre post\<close>
+ucincl_auto result_and_contract
+
+lemma result_and_spec [crush_specs]:
+  shows \<open>\<Gamma>; result_and self res \<Turnstile>\<^sub>F result_and_contract self res\<close>
+  by (crush_boot f: result_and_def contract: result_and_contract_def) (cases self; crush_base)
+
 subsection\<open>and_then\<close>
 
 subsection\<open>as_deref\<close>
