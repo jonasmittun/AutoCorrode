@@ -7,6 +7,13 @@ theory StdLib_Result
 begin
 (*>*)
 
+section\<open>Preamble\<close>
+
+text\<open>The following two declarations are needed for contracts where we pass a function as an argument,
+since this happens multiple times below, we're including the declarations here.\<close>
+declare lift_pure_to_contract_def [crush_contracts]
+ucincl_auto lift_pure_to_contract
+
 section\<open>Core material related to the \<^emph>\<open>Result\<close> type\<close>
 text\<open>Methods for Result enum as part of std::result implemented here 
 based on documentation at https://doc.rust-lang.org/std/result/enum.Result.html\<close>
@@ -16,7 +23,8 @@ subsection\<open>and\<close>
 text\<open>Returns second argument if first \<^verbatim>\<open>Result\<close> is of constructor \<^verbatim>\<open>Ok\<close>,
  otherwise returns \<^verbatim>\<open>Err\<close> value of first argument.\<close>
 
-definition result_and :: \<open>('v, 'e) result \<Rightarrow> ('v, 'e) result \<Rightarrow> ('s, ('v, 'e) result, 'abort, 'i, 'o) function_body\<close> where
+definition result_and :: \<open>('v, 'e) result \<Rightarrow> ('v, 'e) result \<Rightarrow>
+ ('s, ('v, 'e) result, 'abort, 'i, 'o) function_body\<close> where
   \<open>result_and self res \<equiv> FunctionBody \<lbrakk>
      match self {
        Ok(_) \<Rightarrow> res,
@@ -24,7 +32,8 @@ definition result_and :: \<open>('v, 'e) result \<Rightarrow> ('v, 'e) result \<
      }
    \<rbrakk>\<close>
 
-definition result_and_contract ::  \<open>('v, 'e) result \<Rightarrow> ('v, 'e) result \<Rightarrow> ('s::{sepalg}, ('v, 'e) result, 'abort) function_contract\<close> where
+definition result_and_contract ::  \<open>('v, 'e) result \<Rightarrow> ('v, 'e) result \<Rightarrow>
+ ('s::{sepalg}, ('v, 'e) result, 'abort) function_contract\<close> where
   [crush_contracts]: \<open>result_and_contract self res \<equiv>
     let pre  = UNIV;
         post = \<lambda>r. \<langle>r = (case self of Ok(_) \<Rightarrow> res | Err(k) \<Rightarrow> Err(k))\<rangle>
@@ -36,6 +45,44 @@ lemma result_and_spec [crush_specs]:
   by (crush_boot f: result_and_def contract: result_and_contract_def) (cases self; crush_base)
 
 subsection\<open>and_then\<close>
+
+text\<open>Takes \<^verbatim>\<open>Result\<close> and some function, if \<^verbatim>\<open>Result\<close> constructor is \<^verbatim>\<open>Ok\<close>,
+ pass \<^verbatim>\<open>Result\<close> to the function, otherwise return the value of \<^verbatim>\<open>Err\<close>.\<close>
+
+definition result_and_then :: \<open>('v ,'e) result \<Rightarrow> 
+('v \<Rightarrow> ('machine, ('v ,'e) result, 'abort, 'i, 'o) function_body) \<Rightarrow> 
+('machine, ('v ,'e) result, 'abort, 'i, 'o) function_body\<close> where
+  \<open>result_and_then self func \<equiv> FunctionBody \<lbrakk>
+    match self {
+      Ok(v) \<Rightarrow> func(v),
+      Err(e) \<Rightarrow> Err(e)
+    }
+  \<rbrakk>\<close>
+
+definition result_and_then_contract :: \<open>('v, 'e) result \<Rightarrow> ('v \<Rightarrow> ('v, 'e) result) \<Rightarrow> 
+('machine::sepalg, 'abort, 'i, 'o) striple_context \<Rightarrow>
+('v \<Rightarrow> ('machine, ('v ,'e) result, 'abort, 'i prompt, 'o prompt_output) function_body) \<Rightarrow>
+('machine, ('v ,'e) result, 'abort) function_contract\<close> where
+  [crush_contracts]: \<open>result_and_then_contract self pure_fun \<Gamma> rust_fun \<equiv>
+    let pre  = \<langle>\<forall> i. \<Gamma>; rust_fun i \<Turnstile>\<^sub>F lift_pure_to_contract (pure_fun i)\<rangle>;
+        post = \<lambda>r. \<langle>r = (case self of Err(e) \<Rightarrow> Err(e) | Ok(k) \<Rightarrow> pure_fun k)\<rangle>
+    in make_function_contract pre post\<close>
+ucincl_auto result_and_then_contract
+
+lemma result_and_then_spec [crush_specs]:
+  shows \<open>\<Gamma>; result_and_then self rust_fun \<Turnstile>\<^sub>F result_and_then_contract self pure_fun \<Gamma> rust_fun\<close>
+proof (crush_boot f: result_and_then_def contract: result_and_then_contract_def, goal_cases)
+  case 1
+  note rust_fun_spec = this[THEN spec]
+  show ?case
+  proof (cases self)
+    case (Ok x1)
+    then show ?thesis by (crush_base specs add: rust_fun_spec)
+  next
+    case (Err x2)
+    then show ?thesis by crush_base
+  qed
+qed
 
 subsection\<open>as_deref\<close>
 
@@ -233,8 +280,7 @@ definition result_map_err_contract :: \<open>('a, 'e) result \<Rightarrow> ('e \
         post = \<lambda>r. \<langle>r = (case res of Err(e) \<Rightarrow> Err(pure_fun e) | Ok(k) \<Rightarrow> Ok(k))\<rangle>
     in make_function_contract pre post\<close>
 ucincl_auto result_map_err_contract
-declare lift_pure_to_contract_def [crush_contracts]
-ucincl_auto lift_pure_to_contract
+
 
 lemma result_map_err_spec [crush_specs]:
   shows \<open>\<Gamma>; result_map_err res rust_fun \<Turnstile>\<^sub>F result_map_err_contract res pure_fun \<Gamma> rust_fun\<close>
