@@ -86,6 +86,16 @@ qed
 
 subsection\<open>as_deref\<close>
 
+text\<open>On hold for now, might need as_ref to be implemented first.\<close>
+(*
+definition result_as_deref :: \<open>('v, 'e) result \<Rightarrow> ('machine, ('t ,'e) result, 'abort, 'i, 'o) function_body\<close> where
+  \<open>result_as_deref self \<equiv> FunctionBody \<lbrakk>
+    match self {
+      Ok(v) \<Rightarrow> Ok(&w),
+      Err(e) \<Rightarrow> Err(e)
+    }
+  \<rbrakk>\<close>
+*)
 subsection\<open>as_deref_mut\<close>
 
 subsection\<open>as_mut\<close>
@@ -130,6 +140,47 @@ end
 (*>*)
 
 subsection\<open>as_ref\<close>
+
+text\<open>WIP - I'm not convinced that my understanding of the functions related to focus and ro_ref types
+are sufficient to ensure that this function and contract definition are sensible.
+TODO: REVISIT THIS BEFORE PR!\<close>
+
+context reference
+begin       
+adhoc_overloading store_update_const \<rightleftharpoons> update_fun
+
+definition result_as_ref :: \<open>('a, 'b, ('v, 'e) result) ro_ref \<Rightarrow> 
+('s, (('a, 'b, 'v) ro_ref, ('a, 'b, 'e) ro_ref) result, 'abort, 'i prompt, 'o prompt_output) function_body\<close> where
+  \<open>result_as_ref self \<equiv> FunctionBody \<lbrakk>
+    match *self {
+       Ok(_)  \<Rightarrow> Ok (\<llangle>focus_focused result_ok_focus self\<rrangle>),
+       Err(_) \<Rightarrow> Err (\<llangle>focus_focused result_err_focus self\<rrangle>)
+    }
+  \<rbrakk>\<close>
+
+definition result_as_ref_contract :: \<open>'b \<Rightarrow> share \<Rightarrow> ('a, 'b, ('v, 'e) result) ro_ref
+     \<Rightarrow> ('v, 'e) result \<Rightarrow> ('s::{sepalg}, (('a, 'b, 'v) ro_ref, ('a, 'b, 'e) ro_ref) result, 'abort) function_contract\<close> where
+  [crush_contracts]: \<open>result_as_ref_contract g p ref opt \<equiv>
+    let pre  = (unsafe_ref_from_ro_ref ref) \<mapsto>\<langle>p\<rangle> g\<down>opt;
+        post = \<lambda>res. (unsafe_ref_from_ro_ref ref) \<mapsto>\<langle>p\<rangle> g\<down>opt \<star> 
+            \<langle>res = (if result_is_ok opt then
+                      Ok (focus_focused result_ok_focus ref)
+                   else
+                      Err (focus_focused result_err_focus ref))\<rangle>
+    in make_function_contract pre post\<close>
+ucincl_auto result_as_ref_contract
+
+lemma result_as_ref_spec [crush_specs]:
+  shows \<open>\<Gamma>; result_as_ref ref \<Turnstile>\<^sub>F result_as_ref_contract g p ref opt\<close>
+  apply (crush_boot f: result_as_ref_def contract: result_as_ref_contract_def)
+  apply (crush_base simp add: result_is_ok_def split: result.splits)
+  done
+
+no_adhoc_overloading store_update_const \<rightleftharpoons> update_fun
+
+(*<*)
+end
+(*>*)
 
 subsection\<open>cloned\<close>
 
