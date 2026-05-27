@@ -87,15 +87,41 @@ qed
 subsection\<open>as_deref\<close>
 
 text\<open>On hold for now, might need as_ref to be implemented first.\<close>
-(*
-definition result_as_deref :: \<open>('v, 'e) result \<Rightarrow> ('machine, ('t ,'e) result, 'abort, 'i, 'o) function_body\<close> where
+
+context reference
+begin
+
+definition result_as_deref :: \<open>('a, 'b, (('c, 'd, 'v) ref, 'e) result) ref \<Rightarrow>
+    ('s, (('c, 'd, 'v) ref, ('a, 'b, 'e) ref) result, 'abort, 'i prompt, 'o prompt_output) function_body\<close> where
   \<open>result_as_deref self \<equiv> FunctionBody \<lbrakk>
-    match self {
-      Ok(v) \<Rightarrow> Ok(&w),
-      Err(e) \<Rightarrow> Err(e)
+    match *self {
+      Ok(_)  \<Rightarrow> Ok (*(\<llangle>focus_result_ok self\<rrangle>)),
+      Err(_) \<Rightarrow> Err (\<llangle>focus_result_err self\<rrangle>)
     }
   \<rbrakk>\<close>
-*)
+
+definition result_as_deref_contract ::
+  \<open>'b \<Rightarrow> share \<Rightarrow> ('a, 'b, (('c, 'd, 'v) ref, 'e) result) ref \<Rightarrow>
+   (('c, 'd, 'v) ref, 'e) result \<Rightarrow>
+   ('s::{sepalg}, (('c, 'd, 'v) ref, ('a, 'b, 'e) ref) result, 'abort) function_contract\<close> where
+  [crush_contracts]: \<open>result_as_deref_contract g p self opt \<equiv>
+    let pre  = self \<mapsto>\<langle>p\<rangle> g\<down>opt;
+        post = \<lambda>res. self \<mapsto>\<langle>p\<rangle> g\<down>opt \<star> 
+            \<langle>res = (case opt of
+                      Ok(v)  \<Rightarrow> Ok(v)
+                    | Err(_) \<Rightarrow> Err(focus_result_err self))\<rangle>
+    in make_function_contract pre post\<close>
+ucincl_auto result_as_deref_contract
+
+lemma result_as_deref_spec [crush_specs]:
+  shows \<open>\<Gamma>; result_as_deref self \<Turnstile>\<^sub>F result_as_deref_contract g p self opt\<close>
+  apply (crush_boot f: result_as_deref_def contract: result_as_deref_contract_def)
+  apply (crush_base simp add: split: result.splits)
+  apply (simp add: focus_view_def result_ok_focus.rep_eq make_focus_raw_via_view_modify_def)
+  done
+
+end
+
 subsection\<open>as_deref_mut\<close>
 
 subsection\<open>as_mut\<close>
@@ -147,7 +173,6 @@ TODO: REVISIT THIS BEFORE PR!\<close>
 
 context reference
 begin       
-adhoc_overloading store_update_const \<rightleftharpoons> update_fun
 
 definition result_as_ref :: \<open>('a, 'b, ('v, 'e) result) ro_ref \<Rightarrow> 
 ('s, (('a, 'b, 'v) ro_ref, ('a, 'b, 'e) ro_ref) result, 'abort, 'i prompt, 'o prompt_output) function_body\<close> where
@@ -175,8 +200,6 @@ lemma result_as_ref_spec [crush_specs]:
   apply (crush_boot f: result_as_ref_def contract: result_as_ref_contract_def)
   apply (crush_base simp add: result_is_ok_def split: result.splits)
   done
-
-no_adhoc_overloading store_update_const \<rightleftharpoons> update_fun
 
 (*<*)
 end
