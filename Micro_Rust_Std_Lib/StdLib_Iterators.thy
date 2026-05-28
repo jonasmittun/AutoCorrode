@@ -76,15 +76,10 @@ end
 
 
 
-
 declare lift_pure_to_contract_def [crush_contracts]
 ucincl_auto lift_pure_to_contract
 
 subsection\<open>Iterator fold\<close>
-
-text\<open>Folds an accumulator over an iterator. This is the key combinator for expressing
-loop-based computations as a single functional expression.
-Uses monadic sequencing (no mutable references required).\<close>
 
 text\<open>Recursive helper: fold over a list of thunks with an accumulator.\<close>
 fun fold_thunks ::
@@ -135,10 +130,6 @@ proof (crush_boot f: iterator_fold_func_def contract: iterator_fold_contract_def
 qed
 
 subsection\<open>Iterator map\<close>
-
-text\<open>We define @{text map_thunks} with an accumulator to keep the structure tail-recursive,
-mirroring the fold proof pattern. This ensures the induction hypothesis applies directly
-after @{text crush_base} processes the first element.\<close>
 
 fun map_thunks ::
   \<open>('s, 'a, 'r, 'abort, 'i prompt, 'o prompt_output) expression list \<Rightarrow>
@@ -201,9 +192,6 @@ proof (crush_boot f: iterator_map_def contract: iterator_map_contract_def, goal_
 qed
 
 subsection\<open>Iterator filter\<close>
-
-text\<open>Filters elements of an iterator by a predicate, collecting matching elements into a list.
-Uses an accumulator for a tail-recursive structure that mirrors the fold/map proof pattern.\<close>
 
 fun filter_thunks ::
   \<open>('s, 'a, 'r, 'abort, 'i prompt, 'o prompt_output) expression list \<Rightarrow>

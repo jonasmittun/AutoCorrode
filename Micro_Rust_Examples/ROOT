@@ -26,6 +26,7 @@ session Micro_Rust_Examples = HOL +
     MLKEM_Zq
     MLKEM_Polynomial
     MLKEM_NTT
+    MLKEM_Iterator_Examples
   theories [document=false]
     Micro_Rust_Examples
   document_files
