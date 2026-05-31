@@ -20,6 +20,12 @@ definition overflowing_add :: \<open>'l::{len} word \<Rightarrow> 'l word \<Righ
 definition wrapping_add_unsigned :: \<open>'l::{len} word \<Rightarrow> 'l word \<Rightarrow> ('machine, 'l word, 'abort, 'i, 'o) function_body\<close> where
   \<open>wrapping_add_unsigned \<equiv> \<lambda>self rhs. FunctionBody (literal (self + rhs))\<close>
 
+definition wrapping_sub_unsigned :: \<open>'l::{len} word \<Rightarrow> 'l word \<Rightarrow> ('machine, 'l word, 'abort, 'i, 'o) function_body\<close> where
+  \<open>wrapping_sub_unsigned \<equiv> \<lambda>self rhs. FunctionBody (literal (self - rhs))\<close>
+
+definition wrapping_mul_unsigned :: \<open>'l::{len} word \<Rightarrow> 'l word \<Rightarrow> ('machine, 'l word, 'abort, 'i, 'o) function_body\<close> where
+  \<open>wrapping_mul_unsigned \<equiv> \<lambda>self rhs. FunctionBody (literal (self * rhs))\<close>
+
 definition word_sub_saturating_core :: \<open>'l::{len} word \<Rightarrow> 'l word \<Rightarrow> 'l word\<close> where
   \<open>word_sub_saturating_core e f \<equiv> if e < f then 0 else e - f\<close>
 
@@ -84,6 +90,45 @@ lemma wrapping_add_unsigned_spec [crush_specs]:
   shows \<open>\<Gamma> ; wrapping_add_unsigned x y \<Turnstile>\<^sub>F wrapping_add_unsigned_contract x y\<close>
 by (crush_boot f: wrapping_add_unsigned_def contract: wrapping_add_unsigned_contract_def) crush_base
 
+text\<open>
+  \<^verbatim>\<open>wrapping_sub_unsigned\<close> and \<^verbatim>\<open>wrapping_mul_unsigned\<close> complete the unsigned
+  wrapping arithmetic family alongside \<^verbatim>\<open>wrapping_add_unsigned\<close>. Wrapping arithmetic is
+  the \<^emph>\<open>modular\<close> semantics: on overflow/underflow the result is reduced modulo
+  \<^term>\<open>2 ^ LENGTH('l::len)\<close> rather than clamped. This is the crucial difference from the
+  \<^verbatim>\<open>saturating_*\<close> family: a saturating operation pins an out-of-range result to a
+  boundary (\<^term>\<open>(- 1) :: 'l::len word\<close> for unsigned overflow), whereas a wrapping operation
+  performs no clamping at all — its postcondition is an \<^emph>\<open>exact\<close> equality, not a
+  \<^verbatim>\<open>min\<close>/\<^verbatim>\<open>max\<close> expression. Because the word operators \<^term>\<open>(-)\<close> and
+  \<^term>\<open>(*)\<close> on \<^typ>\<open>'l::len word\<close> already compute modulo \<^term>\<open>2 ^ LENGTH('l::len)\<close>,
+  the wrapping result is literally \<^term>\<open>x - y\<close> resp. \<^term>\<open>x * y\<close> with no auxiliary
+  reasoning; in particular the underflow case of subtraction needs no separate lemma, since
+  word subtraction is total and already yields \<^term>\<open>x - y\<close> in the modular interpretation.
+\<close>
+
+definition wrapping_sub_unsigned_contract :: \<open>'l::{len} word \<Rightarrow> 'l word \<Rightarrow>
+      ('machine::{sepalg}, 'l word, 'b) function_contract\<close> where
+  [crush_contracts]: \<open>wrapping_sub_unsigned_contract x y \<equiv>
+    let pre = \<langle>True\<rangle> in
+    let post = \<lambda>ret. \<langle>ret = x - y\<rangle> in
+      make_function_contract pre post\<close>
+ucincl_auto wrapping_sub_unsigned_contract
+
+lemma wrapping_sub_unsigned_spec [crush_specs]:
+  shows \<open>\<Gamma> ; wrapping_sub_unsigned x y \<Turnstile>\<^sub>F wrapping_sub_unsigned_contract x y\<close>
+by (crush_boot f: wrapping_sub_unsigned_def contract: wrapping_sub_unsigned_contract_def) crush_base
+
+definition wrapping_mul_unsigned_contract :: \<open>'l::{len} word \<Rightarrow> 'l word \<Rightarrow>
+      ('machine::{sepalg}, 'l word, 'b) function_contract\<close> where
+  [crush_contracts]: \<open>wrapping_mul_unsigned_contract x y \<equiv>
+    let pre = \<langle>True\<rangle> in
+    let post = \<lambda>ret. \<langle>ret = x * y\<rangle> in
+      make_function_contract pre post\<close>
+ucincl_auto wrapping_mul_unsigned_contract
+
+lemma wrapping_mul_unsigned_spec [crush_specs]:
+  shows \<open>\<Gamma> ; wrapping_mul_unsigned x y \<Turnstile>\<^sub>F wrapping_mul_unsigned_contract x y\<close>
+by (crush_boot f: wrapping_mul_unsigned_def contract: wrapping_mul_unsigned_contract_def) crush_base
+
 definition saturating_sub_contract :: \<open>'l::{len} word \<Rightarrow> 'l word \<Rightarrow>
       ('machine::{sepalg}, 'l word, 'b) function_contract\<close> where
   [crush_contracts]: \<open>saturating_sub_contract x y \<equiv>
@@ -96,6 +141,65 @@ lemma saturating_sub_spec [crush_specs]:
   shows \<open>\<Gamma> ; saturating_sub x y \<Turnstile>\<^sub>F saturating_sub_contract x y\<close>
 by (crush_boot f: saturating_sub_def contract: saturating_sub_contract_def)
   (crush_base simp add: word_sub_saturating_core_def)
+
+text\<open>
+  \<^verbatim>\<open>saturating_add\<close> and \<^verbatim>\<open>saturating_mul\<close> complete the unsigned saturating
+  arithmetic family started by \<^verbatim>\<open>saturating_sub\<close>. For an unsigned word type there is a
+  single saturation boundary, the maximum representable value \<^term>\<open>(- 1) :: 'l::len word\<close>
+  (all ones), reached on overflow; there is no lower boundary because the result can never
+  underflow below \<^term>\<open>0\<close>. This is why these proofs are simpler than their eventual signed
+  counterparts would be: a signed variant would have to reason about two boundaries
+  (\<^verbatim>\<open>MIN\<close> and \<^verbatim>\<open>MAX\<close>) and the sign of the operands. Overflow is detected on the
+  unbounded naturals via \<^term>\<open>unat\<close>, exactly as in \<^verbatim>\<open>overflowing_add\<close>/\<^verbatim>\<open>checked_add\<close>
+  above, because word addition and multiplication wrap modulo \<^term>\<open>2 ^ LENGTH('l::len)\<close> and so
+  cannot themselves witness the overflow.
+\<close>
+
+definition word_add_saturating_core :: \<open>'l::{len} word \<Rightarrow> 'l word \<Rightarrow> 'l word\<close> where
+  \<open>word_add_saturating_core e f \<equiv> if unat e + unat f \<ge> 2^LENGTH('l) then - 1 else e + f\<close>
+
+definition word_mul_saturating_core :: \<open>'l::{len} word \<Rightarrow> 'l word \<Rightarrow> 'l word\<close> where
+  \<open>word_mul_saturating_core e f \<equiv> if unat e * unat f \<ge> 2^LENGTH('l) then - 1 else e * f\<close>
+
+definition saturating_add :: \<open>'l::{len} word \<Rightarrow> 'l word \<Rightarrow> ('s, 'l word, 'abort, 'i, 'o) function_body\<close> where
+  \<open>saturating_add e f \<equiv> FunctionBody (literal (word_add_saturating_core e f))\<close>
+
+definition saturating_mul :: \<open>'l::{len} word \<Rightarrow> 'l word \<Rightarrow> ('s, 'l word, 'abort, 'i, 'o) function_body\<close> where
+  \<open>saturating_mul e f \<equiv> FunctionBody (literal (word_mul_saturating_core e f))\<close>
+
+text\<open>
+  The contracts are pure (precondition \<^term>\<open>\<top>\<close>, no heap interaction) and state the
+  saturated result directly, mirroring the boundary in the core functions: on overflow the
+  result is pinned to the maximum word \<^term>\<open>(- 1) :: 'l::len word\<close>, otherwise it is the exact
+  wrapping sum/product (which, in the non-overflow case, coincides with the mathematical
+  one).
+\<close>
+
+definition saturating_add_contract :: \<open>'l::{len} word \<Rightarrow> 'l word \<Rightarrow>
+      ('machine::{sepalg}, 'l word, 'b) function_contract\<close> where
+  [crush_contracts]: \<open>saturating_add_contract x y \<equiv>
+    let pre = \<langle>True\<rangle> in
+    let post = \<lambda>ret. \<langle>ret = (if unat x + unat y \<ge> 2^LENGTH('l) then - 1 else x + y)\<rangle> in
+      make_function_contract pre post\<close>
+ucincl_auto saturating_add_contract
+
+lemma saturating_add_spec [crush_specs]:
+  shows \<open>\<Gamma> ; saturating_add x y \<Turnstile>\<^sub>F saturating_add_contract x y\<close>
+by (crush_boot f: saturating_add_def contract: saturating_add_contract_def)
+  (crush_base simp add: word_add_saturating_core_def)
+
+definition saturating_mul_contract :: \<open>'l::{len} word \<Rightarrow> 'l word \<Rightarrow>
+      ('machine::{sepalg}, 'l word, 'b) function_contract\<close> where
+  [crush_contracts]: \<open>saturating_mul_contract x y \<equiv>
+    let pre = \<langle>True\<rangle> in
+    let post = \<lambda>ret. \<langle>ret = (if unat x * unat y \<ge> 2^LENGTH('l) then - 1 else x * y)\<rangle> in
+      make_function_contract pre post\<close>
+ucincl_auto saturating_mul_contract
+
+lemma saturating_mul_spec [crush_specs]:
+  shows \<open>\<Gamma> ; saturating_mul x y \<Turnstile>\<^sub>F saturating_mul_contract x y\<close>
+by (crush_boot f: saturating_mul_def contract: saturating_mul_contract_def)
+  (crush_base simp add: word_mul_saturating_core_def)
 
 definition div_ceil_contract :: \<open>'l::{len} word \<Rightarrow> 'l word \<Rightarrow> ('machine::{sepalg}, 'l word, 'b) function_contract\<close> where
   [crush_contracts]: \<open>div_ceil_contract x y \<equiv>
@@ -156,6 +260,72 @@ lemma nonzero_u64_get_spec [crush_specs]:
   apply (cases nz)
   apply (simp add: aentails_refl asepconj_False_True(2) asepconj_UNIV_idempotent wp_literalI)
   done
+
+section\<open>Usage test: composing the saturating family\<close>
+
+text\<open>
+  A small \<^verbatim>\<open>experiment\<close> exercising both new functions in a single \<^verbatim>\<open>\<mu>Rust\<close>
+  expression: saturating-add two values, then saturating-multiply the result by a third.
+  The composed contract is discharged purely from the two registered \<^verbatim>\<open>crush_specs\<close>.
+\<close>
+
+experiment
+begin
+
+definition saturating_add_then_mul :: \<open>'l::{len} word \<Rightarrow> 'l word \<Rightarrow> 'l word \<Rightarrow>
+    ('s, 'l word, 'abort, 'i prompt, 'o prompt_output) function_body\<close> where
+  \<open>saturating_add_then_mul a b c \<equiv> FunctionBody \<lbrakk>
+     let s = saturating_add(a, b);
+     return saturating_mul(s, c);
+  \<rbrakk>\<close>
+
+definition saturating_add_then_mul_contract :: \<open>'l::{len} word \<Rightarrow> 'l word \<Rightarrow> 'l word \<Rightarrow>
+      ('machine::{sepalg}, 'l word, 'b) function_contract\<close> where
+  [crush_contracts]: \<open>saturating_add_then_mul_contract a b c \<equiv>
+    let pre = \<langle>True\<rangle> in
+    let post = \<lambda>ret. \<langle>ret = word_mul_saturating_core (word_add_saturating_core a b) c\<rangle> in
+      make_function_contract pre post\<close>
+ucincl_auto saturating_add_then_mul_contract
+
+lemma saturating_add_then_mul_spec:
+  shows \<open>\<Gamma> ; saturating_add_then_mul a b c \<Turnstile>\<^sub>F saturating_add_then_mul_contract a b c\<close>
+by (crush_boot f: saturating_add_then_mul_def contract: saturating_add_then_mul_contract_def)
+  (crush_base simp add: word_add_saturating_core_def word_mul_saturating_core_def)
+
+end
+
+section\<open>Usage test: composing the wrapping family\<close>
+
+text\<open>
+  An \<^verbatim>\<open>experiment\<close> exercising both new wrapping functions in a single
+  \<^verbatim>\<open>\<mu>Rust\<close> expression: wrapping-subtract two values, then wrapping-multiply the result
+  by a third. The composed contract is discharged purely from the two registered
+  \<^verbatim>\<open>crush_specs\<close>, and its postcondition is an exact modular equality.
+\<close>
+
+experiment
+begin
+
+definition wrapping_sub_then_mul :: \<open>'l::{len} word \<Rightarrow> 'l word \<Rightarrow> 'l word \<Rightarrow>
+    ('s, 'l word, 'abort, 'i prompt, 'o prompt_output) function_body\<close> where
+  \<open>wrapping_sub_then_mul a b c \<equiv> FunctionBody \<lbrakk>
+     let s = wrapping_sub_unsigned(a, b);
+     return wrapping_mul_unsigned(s, c);
+  \<rbrakk>\<close>
+
+definition wrapping_sub_then_mul_contract :: \<open>'l::{len} word \<Rightarrow> 'l word \<Rightarrow> 'l word \<Rightarrow>
+      ('machine::{sepalg}, 'l word, 'b) function_contract\<close> where
+  [crush_contracts]: \<open>wrapping_sub_then_mul_contract a b c \<equiv>
+    let pre = \<langle>True\<rangle> in
+    let post = \<lambda>ret. \<langle>ret = (a - b) * c\<rangle> in
+      make_function_contract pre post\<close>
+ucincl_auto wrapping_sub_then_mul_contract
+
+lemma wrapping_sub_then_mul_spec:
+  shows \<open>\<Gamma> ; wrapping_sub_then_mul a b c \<Turnstile>\<^sub>F wrapping_sub_then_mul_contract a b c\<close>
+by (crush_boot f: wrapping_sub_then_mul_def contract: wrapping_sub_then_mul_contract_def) crush_base
+
+end
 
 (*<*)
 end
