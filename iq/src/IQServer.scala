@@ -679,6 +679,9 @@ class IQServer(
         ),
         IQToolName.SaveFile -> (params =>
           handleSaveFile(params.toMap).map(IQToolResult.fromMap)
+        ),
+        IQToolName.SetAutoSave -> (params =>
+          handleSetAutoSave(params.toMap).map(IQToolResult.fromMap)
         )
       )
       base ++ replToolHandlers
@@ -1574,7 +1577,15 @@ class IQServer(
       ),
       Map(
         "name" -> "write_file",
-        "description" -> "Write or modify content in an Isabelle theory file. Supports replacement and text insertion. Returns the status of commands affected by the edit, and statistics on how many commands where successful/failed/canceled/unprocessed.",
+        "description" -> ("Write or modify content in an Isabelle theory file. Supports replacement and text insertion. " +
+          "Returns three siblings: 'commands' lists the Isabelle commands inside the inserted text with per-command status; " +
+          "'edit_summary' aggregates that range, the edit metadata (bytes_written, new_line_count), " +
+          "the range-scoped counts (commands_affected, edits_failed, edits_finished, edits_canceled, edits_unprocessed), " +
+          "and 'scope_resolved' (the actual check_context_scope used after any degradation); " +
+          "'file_summary' is theory-scoped (total_commands, commands_failed, commands_finished, " +
+          "commands_unprocessed, any_canceled, errors, warnings, fully_processed, consolidated). " +
+          "An edit reporting edits_failed=0 may still leave the file with file_summary.errors > 0 if commands outside the inserted range broke. " +
+          "Use 'check_context_scope' to widen what wait_until_processed waits on (e.g. 'proof' to also recheck the enclosing lemma)."),
         "inputSchema" -> Map(
           "type" -> "object",
           "properties" -> Map(
@@ -1625,6 +1636,17 @@ class IQServer(
             "timeout_per_command" -> Map(
               "type" -> "integer",
               "description" -> "Per-command running grace period in milliseconds when wait_until_processed=true. Default: 5000."
+            ),
+            "check_context_scope" -> Map(
+              "type" -> "string",
+              "description" -> ("How widely to wait/recheck around the inserted text. " +
+                "'command': just the inserted text. " +
+                "'block' (default): the innermost enclosing 'proof ... qed' (the current proof layer); if the edit is outside any 'proof' keyword the resolver falls back to the surrounding lemma/theorem block and reports scope_resolved=proof. " +
+                "'proof': the outermost enclosing 'proof ... qed' (the entire proof of the enclosing lemma). Inside a non-nested proof this coincides with 'block'; inside a nested proof it is strictly wider. For edits outside any 'proof' it is the surrounding lemma/theorem block. " +
+                "'file': the whole theory. " +
+                "Only affects how long write_file blocks; the 'commands' array stays scoped to the inserted text. " +
+                "If the edit isn't inside any structured block, 'block' and 'proof' degrade to 'command'."),
+              "enum" -> List("command", "block", "proof", "file")
             )
           ),
           "required" -> List("path", "command"),
@@ -1931,6 +1953,22 @@ class IQServer(
             "path" -> Map(
               "type" -> "string",
               "description" -> "Optional path to a specific file to save. If omitted, saves all modified dirty buffers that pass mutation-root policy."
+            )
+          ),
+          "additionalProperties" -> false
+        )
+      ),
+      Map(
+        "name" -> "set_auto_save",
+        "description" -> ("Toggle or query I/Q auto-save. When enabled (the default), every write_file edit is " +
+          "persisted to disk immediately, keeping the jEdit buffer and the file-system contents in sync. " +
+          "Omit 'enabled' to query the current state without changing it. Returns the resulting state."),
+        "inputSchema" -> Map(
+          "type" -> "object",
+          "properties" -> Map(
+            "enabled" -> Map(
+              "type" -> "boolean",
+              "description" -> "True to enable auto-save, false to disable. If omitted, the current state is returned unchanged."
             )
           ),
           "additionalProperties" -> false
@@ -2401,6 +2439,24 @@ class IQServer(
     val (startOffset, endOffset) =
       IQLineOffsetUtils.normalizeOffsetRange(startOffsetRaw, endOffsetRaw, content.length)
 
+    // Optional widened wait range: callers (currently only handleWriteFile)
+    // can ask the wait loop to settle a range broader than the one reported
+    // in `commands`. The reported range stays [startOffset, endOffset).
+    val waitStartOffsetOpt = IQArgumentUtils.optionalIntParam(params, "wait_start_offset") match {
+      case Right(v) => v
+      case Left(err) => return Left(err)
+    }
+    val waitEndOffsetOpt = IQArgumentUtils.optionalIntParam(params, "wait_end_offset") match {
+      case Right(v) => v
+      case Left(err) => return Left(err)
+    }
+    val (waitStartOffset, waitEndOffset) =
+      IQLineOffsetUtils.normalizeOffsetRange(
+        waitStartOffsetOpt.getOrElse(startOffset),
+        waitEndOffsetOpt.getOrElse(endOffset),
+        content.length
+      )
+
     val waitUntilProcessed = params.get("wait_until_processed") match {
       case Some(value: Boolean) => value
       case _ => false
@@ -2432,7 +2488,7 @@ class IQServer(
 
     def retrieveStatuses(): List[CommandStatusSummary] = {
       val snapshot = PIDE.session.snapshot(node_name = node_name)
-      getCommandStatusesInOffsetRange(snapshot, node_name, startOffset, endOffset)
+      getCommandStatusesInOffsetRange(snapshot, node_name, waitStartOffset, waitEndOffset)
     }
 
     def allStatusesProcessed(statuses: List[CommandStatusSummary]): Boolean =
@@ -3390,6 +3446,18 @@ class IQServer(
       case Left(err) => return Left(err)
     }
 
+    val checkContextScope: CheckContextScope = params.get("check_context_scope") match {
+      case Some(value: String) if value.trim.nonEmpty =>
+        CheckContextScope.fromWire(value.trim) match {
+          case Right(decoded) => decoded
+          case Left(raw) =>
+            return Left(s"Unknown check_context_scope '$raw'. Expected one of: command, block, proof, file")
+        }
+      case Some(_) =>
+        return Left("Invalid parameter 'check_context_scope': expected string")
+      case None => CheckContextScope.Block
+    }
+
     // Lookup buffer associated with file
     // We currently require that the file is opened in jEdit
     val (content, buffer_model) = getBufferModel(filePath) match {
@@ -3472,9 +3540,24 @@ class IQServer(
     // Wait until the edit has been processed (stable snapshot = no pending edits)
     val _ = IQUtils.blockOnStableSnapshot(buffer_model)
 
+    // Auto-save the buffer to disk so the file-system state never diverges from
+    // the jEdit buffer. Mutation path was already authorized above.
+    if (IQAutoSave.enabled) {
+      GUI_Thread.now {
+        val buffer = buffer_model.buffer
+        if (buffer.isDirty()) {
+          buffer.save(null, null)
+          Output.writeln(s"I/Q Server: Auto-saved file after edit: $filePath")
+        }
+      }
+    }
+
     Output.writeln(s"I/Q Server: Auto-calling get_command for modified range in $filePath")
 
-    val newEndOffset: Int = endOffset + text.length
+    val newEndOffset: Int = startOffset + text.length
+    val newContent = getFileContent(filePath).getOrElse("")
+    val (waitStartOffset, waitEndOffset, scopeResolved) =
+      resolveCheckContextWindow(buffer_model, newContent, startOffset, newEndOffset, checkContextScope)
 
     // Create parameters for get_command call - use current command mode for now
     val getCommandParams = scala.collection.mutable.Map[String, Any](
@@ -3482,6 +3565,8 @@ class IQServer(
       "mode" -> "offset",
       "start_offset" -> startOffset,
       "end_offset" -> newEndOffset,
+      "wait_start_offset" -> waitStartOffset,
+      "wait_end_offset" -> waitEndOffset,
       "wait_until_processed" -> waitUntilProcessed,
       "timeout" -> timeoutMs.getOrElse(5000L),
       "timeout_per_command" -> timeoutPerCommandMs.getOrElse(5000)
@@ -3493,19 +3578,39 @@ class IQServer(
       case Left(err) => return Left(f"handleGetCommandCore failed with $err")
     }
 
-    // Enhance summary with line count and bytes written
-    val newContent = getFileContent(filePath).getOrElse("")
     val newLineCount = IQLineOffsetUtils.splitLines(newContent).length
     val bytesWritten = text.getBytes("UTF-8").length
-    val linesAffected = math.abs(newEndOffset - startOffset)
-    
-    val enhancedSummary = coreResult.summary ++ Map(
-      "new_line_count" -> newLineCount,
+
+    // edit_summary describes the edit and how the commands inside the
+    // inserted range fared. file_summary is theory-scoped so the caller
+    // sees the state of the whole file, not just the edit window.
+    val rangeSummary = coreResult.summary
+    def rangeCount(key: String): Int = rangeSummary.get(key) match {
+      case Some(v: Int) => v
+      case Some(v: Long) => v.toInt
+      case _ => 0
+    }
+    val editSummary = Map[String, Any](
       "bytes_written" -> bytesWritten,
-      "lines_affected" -> linesAffected
+      "new_line_count" -> newLineCount,
+      "commands_affected" -> rangeCount("total_commands"),
+      "edits_failed" -> rangeCount("commands_failed"),
+      "edits_finished" -> rangeCount("commands_finished"),
+      "edits_canceled" -> rangeCount("commands_canceled"),
+      "edits_unprocessed" -> rangeCount("commands_unprocessed"),
+      "scope_resolved" -> scopeResolved.wire
     )
 
-    Right(Map("commands" -> coreResult.commandsData, "summary" -> enhancedSummary))
+    // Refresh post-edit content for file_summary, since wait may have
+    // updated processing state.
+    val postWaitContent = getFileContent(filePath).getOrElse(newContent)
+    val fileSummary = buildFileSummary(buffer_model, postWaitContent)
+
+    Right(Map(
+      "commands" -> coreResult.commandsData,
+      "edit_summary" -> editSummary,
+      "file_summary" -> fileSummary
+    ))
   }
 
   private def openFileCommon(
@@ -3632,7 +3737,14 @@ class IQServer(
     val writer = new java.io.FileWriter(file)
     try {
       if (content.nonEmpty) {
-        writer.write(content)
+        // Re-encode Isabelle symbols to named form (\<sym>) before writing.
+        // Incoming text params are Symbol.decode'd on ingest, so without this
+        // the file would contain raw Unicode glyphs. PIDE/jEdit Symbol-decodes
+        // on read and so tolerates either form, but Isabelle's batch loader
+        // (isabelle build) is symbol-strict and only accepts named tokens on
+        // disk. Encoding here keeps this direct-write path symmetric with the
+        // jEdit buffer.save path (which encodes via UTF-8-Isabelle).
+        writer.write(Symbol.encode(content))
       } else if (filePath.endsWith(".thy")) {
         val theoryName = file.getName.stripSuffix(".thy")
         val template = s"""theory $theoryName
@@ -5260,6 +5372,133 @@ end"""
   }
 
   /**
+   * Resolve a check-context scope to an offset range in the post-edit
+   * content. The returned range is the union of the inserted text and the
+   * surrounding scope. The second component of the result is the actually
+   * resolved scope, which may degrade (e.g. 'block' or 'proof' falls back
+   * to 'command' if the edit isn't inside any structured block, or to the
+   * smallest containing block we can pin down).
+   *
+   * The block walk reuses the same keyword-tracking logic as
+   * extractProofBlockAtIndex: ProofBlockStarters open a level, ProofBlock
+   * StructuralEnders (and `by` at depth 0) close one. 'block' returns the
+   * innermost enclosing 'proof ... qed' (the current proof layer); 'proof'
+   * returns the outermost enclosing 'proof ... qed' (the entire lemma
+   * proof). When the edit is inside no 'proof' body, both fall back to the
+   * enclosing 'lemma ... qed/by'.
+   */
+  private def resolveCheckContextWindow(
+      model: Document_Model,
+      content: String,
+      editStart: Int,
+      editEnd: Int,
+      scope: CheckContextScope
+  ): (Int, Int, CheckContextScope) = {
+    if (scope == CheckContextScope.Command) return (editStart, editEnd, scope)
+    if (scope == CheckContextScope.File)    return (0, content.length, scope)
+
+    val node_name = model.node_name
+    val snapshot = PIDE.session.snapshot(node_name = node_name)
+    val node = snapshot.get_node(node_name)
+    if (node == null) return (editStart, editEnd, CheckContextScope.Command)
+
+    // Project the post-edit command stream into a small PIDE-free shape
+    // and delegate the actual walk to IQScopeResolution. The shape and
+    // semantics are covered by the unit tests in
+    // iq/test/IQScopeResolutionTest.scala -- avoid duplicating the walk
+    // here.
+    val stubs: IndexedSeq[IQScopeResolution.ScopeCommand] =
+      node.command_iterator()
+        .map { case (cmd, off) =>
+          IQScopeResolution.ScopeCommand(cmd.span.name, off, cmd.length)
+        }
+        .toIndexedSeq
+
+    IQScopeResolution.resolveScope(stubs, content.length, editStart, editEnd, scope)
+  }
+
+  /**
+   * Build a theory-scoped summary of the current state of a file: command
+   * counts in PIDE states (failed/finished/canceled/unprocessed), error and
+   * warning diagnostic counts across the whole file, and processing flags
+   * (fully_processed, consolidated). Used by handleWriteFile so its response
+   * tells the agent the state of the entire theory, not just the edited
+   * range.
+   */
+  private def buildFileSummary(model: Document_Model, content: String): Map[String, Any] = {
+    val node_name = model.node_name
+    val snapshot = PIDE.session.snapshot(node_name = node_name)
+    val state = snapshot.state
+    val version = snapshot.version
+
+    // PIDE counts every command, including the whitespace/comment "filler"
+    // commands between real ones, so Node_Status.total is roughly twice the
+    // number of meaningful commands. Iterate ourselves and tally only
+    // commands whose source has any non-whitespace content -- this matches
+    // the trimming policy of the `commands` array
+    // (see handleGetCommandCore -> commandInfosTrimmed) and keeps the
+    // file_summary numbers consistent with what the user actually sees.
+    var failed = 0
+    var canceled = false
+    var finished = 0
+    var unprocessed = 0
+    var total = 0
+    var anyTerminated = true
+    val node = snapshot.get_node(node_name)
+    val commandIter =
+      if (node == null) Iterator.empty else node.commands.iterator
+    for (command <- commandIter if command.source.trim.nonEmpty) {
+      val cs = state.command_status(version, command)
+      total += 1
+      if (cs.is_failed) failed += 1
+      else if (cs.is_running || cs.is_unprocessed) unprocessed += 1
+      else if (cs.is_finished || cs.is_warned) finished += 1
+      // A command that is none of the above is not accepted yet: PIDE has
+      // not assigned it execution state in this document version (e.g. the
+      // post-edit invalidation window, where downstream commands of the new
+      // version briefly have accepted=false, touched=false). is_unprocessed
+      // short-circuits on accepted=false and so misses it; PIDE's own
+      // Node_Status.make defaults this state to unprocessed too. Counting it
+      // as finished would over-report progress, so default to unprocessed.
+      // (is_failed stays first above so a failed-but-still-running command is
+      // reported as failed, not unprocessed.)
+      else unprocessed += 1
+      if (cs.is_canceled) canceled = true
+      if (!cs.is_terminated) anyTerminated = false
+    }
+
+    val errorCount =
+      collectDiagnosticsInRange(
+        snapshot,
+        Text.Range(0, content.length),
+        DiagnosticsSeverity.Error,
+        None
+      ).length
+    val warningCount =
+      collectDiagnosticsInRange(
+        snapshot,
+        Text.Range(0, content.length),
+        DiagnosticsSeverity.Warning,
+        None
+      ).length
+
+    val node_status =
+      Document_Status.Node_Status.make(Date.now(), state, version, node_name)
+
+    Map(
+      "total_commands" -> total,
+      "commands_failed" -> failed,
+      "commands_finished" -> finished,
+      "commands_unprocessed" -> unprocessed,
+      "any_canceled" -> canceled,
+      "errors" -> errorCount,
+      "warnings" -> warningCount,
+      "fully_processed" -> (anyTerminated && unprocessed == 0),
+      "consolidated" -> node_status.consolidated
+    )
+  }
+
+  /**
    * Handles the get_processing_status tool request.
    * Returns PIDE processing status for a file.
    */
@@ -5440,6 +5679,31 @@ end"""
         Output.writeln(s"I/Q Server: Save file error: ${ex.getMessage}")
         ex.printStackTrace()
         Left(s"Save file error: ${ex.getMessage}")
+    }
+  }
+
+  /**
+   * Handles the set_auto_save tool request.
+   *
+   * Toggles or queries the shared auto-save state. When enabled, write_file
+   * edits are persisted to disk immediately. Omitting the `enabled` parameter
+   * queries the current state without changing it.
+   *
+   * @param params The tool parameters
+   * @return Either error message or result data
+   */
+  private def handleSetAutoSave(params: Map[String, Any]): Either[String, Map[String, Any]] = {
+    params.get("enabled") match {
+      case None =>
+        // Query only
+        Right(Map("enabled" -> IQAutoSave.enabled, "changed" -> false))
+      case Some(value: Boolean) =>
+        val previous = IQAutoSave.enabled
+        IQAutoSave.setEnabled(value)
+        Output.writeln(s"I/Q Server: Auto-save set to $value (was $previous)")
+        Right(Map("enabled" -> value, "changed" -> (value != previous)))
+      case Some(other) =>
+        Left(s"enabled parameter must be a boolean, got: $other")
     }
   }
 }

@@ -189,10 +189,10 @@ syntax
   "_urust_numeral_ascription_usize" :: "num_const \<Rightarrow> urust"
     ("_'_usize")
   \<comment> \<open>Breakpoints\<close>
-  "_urust_pause" :: "urust" 
+  "_urust_pause" :: "urust"
     ("\<y>\<i>\<e>\<l>\<d>")
   \<comment> \<open>Logging\<close>
-  "_urust_log" :: "'value \<Rightarrow> 'value \<Rightarrow> urust" 
+  "_urust_log" :: "'value \<Rightarrow> 'value \<Rightarrow> urust"
     ("\<l>\<o>\<g> \<llangle>_\<rrangle> \<llangle>_\<rrangle>")
   \<comment> \<open>The special unit value\<close>
   "_urust_unit" :: "urust"
@@ -234,6 +234,10 @@ syntax
     ("_'!/ '(')" [1000]999)
   "_urust_macro_with_args" :: "urust_identifier \<Rightarrow> urust_args \<Rightarrow> urust"
     ("_'!/ '(_')" [1000,0]999)
+  "_urust_macro_no_args" :: "urust_identifier \<Rightarrow> urust"
+    ("_'!/ '[]" [1000]999)
+  "_urust_macro_with_args" :: "urust_identifier \<Rightarrow> urust_args \<Rightarrow> urust"
+    ("_'!/ '[_']" [1000,0]999)
   "_urust_funcall_with_args" :: "urust_callable \<Rightarrow> urust_args \<Rightarrow> urust"
     ("_/ '(_')"[1000,0]999)
   "_urust_funcall_no_args" :: "urust_callable \<Rightarrow> urust"
@@ -325,6 +329,12 @@ syntax
   \<comment>\<open>Add mutable binding\<close>
   "_urust_bind_mutable" :: "urust_identifier \<Rightarrow> urust \<Rightarrow> urust \<Rightarrow> urust"
     ("let/ mut/ _/ =/ _;// _" [1000,20,10]10)
+  \<comment>\<open>Mutable binding with tuple pattern: \<^verbatim>\<open>let mut (x, y) = expr\<close>.
+      Rust's local-variable mutability is not modelled by the shallow embedding, so this desugars
+      to an immutable tuple destructure. The \<^verbatim>\<open>mut\<close> annotation is accepted for syntactic
+      correspondence with Rust source code.\<close>
+  "_urust_bind_mutable_pattern" :: "urust_let_pattern_args \<Rightarrow> urust \<Rightarrow> urust \<Rightarrow> urust"
+    ("let/ mut/ '(_')/ =/ _;// _" [1000,20,10]10)
   \<comment>\<open>Boolean literals as expressions\<close>
   "_urust_true" :: \<open>urust\<close>
     ("true" 1000)
@@ -520,6 +530,11 @@ syntax
     (infix \<open>..\<close> 41)
   "_urust_match_pattern_range_eq" :: \<open>urust_pattern \<Rightarrow> urust_pattern \<Rightarrow> urust_pattern\<close>
     (infix \<open>..=\<close> 41)
+
+  \<comment>\<open>The \<^verbatim>\<open>matches!\<close> macro: \<^verbatim>\<open>matches!(expr, pattern)\<close>. The second argument is parsed in
+      \<^verbatim>\<open>urust_pattern\<close> position so that constructor patterns and disjunctions are handled correctly.\<close>
+  "_urust_matches_macro" :: \<open>urust \<Rightarrow> urust_pattern \<Rightarrow> urust\<close>
+    ("matches'!/ '(_, _')" [0, 100] 999)
 
   \<comment> \<open>See the rust documentation for a list of expression precedences and fixities:
        https://doc.rust-lang.org/reference/expressions.html\<close>
@@ -984,9 +999,9 @@ parse_ast_translation\<open>
       end;
 
     \<comment> \<open>Split the \<^verbatim>\<open>_path_builder\<close> syntax representation of \<^verbatim>\<open>foo::bar.zoo.far\<close> into \<^verbatim>\<open>("foo::bar", ["zoo", "far"])\<close>\<close>
-    fun split_path_n_field 
+    fun split_path_n_field
       (Ast.Appl [Ast.Constant \<^syntax_const>\<open>_path_builder_two_longid\<close>, Ast.Variable secondlast, last]) =
-        let 
+        let
           val (tailhead, tailtail) = split_longid last
         in
           (secondlast ^ "::" ^ tailhead, tailtail)
@@ -1082,7 +1097,7 @@ parse_ast_translation\<open>
                AST in a meaningful way, and keep it as is.
                The problem is now that this will give a very poor error message, so add some logging\<close>
             let
-              val _ = writeln "Error: detected match with mixed numeral and constructors" 
+              val _ = writeln "Error: detected match with mixed numeral and constructors"
             in
               \<^syntax_const>\<open>_urust_temporary_match\<close>
             end
