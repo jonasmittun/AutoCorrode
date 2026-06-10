@@ -44,6 +44,8 @@ lemma array_index_spec [crush_specs]:
   shows \<open>\<Gamma> ; array_index lst idx \<Turnstile>\<^sub>F array_index_contract lst idx\<close>
   by (crush_boot f: array_index_def contract: array_index_contract_def) crush_base
 
+consts slice_len_const :: \<open>'a \<Rightarrow> ('s, nat, 'abort, 'i, 'o) function_body\<close>
+
 context reference begin
 
 adhoc_overloading store_update_const \<rightleftharpoons> update_fun
@@ -167,6 +169,78 @@ lemma list_index_range_spec [crush_specs]:
   shows \<open>\<Gamma> ; list_index_range xs r \<Turnstile>\<^sub>F list_index_range_contract xs r\<close>
   by (crush_boot f: list_index_range_def contract: list_index_range_contract_def)
      (crush_base split!: range.splits; simp)
+
+text\<open>Slice builtin len function definitions for slices represented as list, array and vector.\<close>
+
+(* list *)
+definition slice_len :: \<open>('a, 'b, 'v list) Global_Store.ref \<Rightarrow>('s, nat, 'abort, 'i prompt, 'o prompt_output) function_body\<close> where
+  \<open>slice_len r \<equiv> FunctionBody \<lbrakk>
+    let ls = *r;
+    \<llangle>length\<rrangle>\<^sub>1(ls)
+\<rbrakk>\<close>
+
+definition slice_len_contract :: \<open>(('a, 'b) gref, 'b, 'c list) focused \<Rightarrow> 'b \<Rightarrow> 'c list \<Rightarrow>
+      share \<Rightarrow> ('s, nat, 'abort) function_contract\<close> where
+  [crush_contracts]: \<open>slice_len_contract ptr g ls sh \<equiv>
+    let pre = ptr \<mapsto>\<langle>sh\<rangle> g\<down>ls in
+    let post = \<lambda>r. ptr \<mapsto>\<langle>sh\<rangle> g\<down>ls \<star> \<langle> r = length ls\<rangle> in
+      make_function_contract pre post\<close>
+ucincl_auto slice_len_contract
+
+lemma slice_len_spec [crush_specs]:
+  shows \<open>\<Gamma> ; slice_len ptr  \<Turnstile>\<^sub>F slice_len_contract ptr g ls sh\<close>
+  apply (crush_boot f: slice_len_def contract: slice_len_contract_def)
+  apply crush_base
+  done
+
+(* array *)
+definition slice_len_array :: \<open>('a, 'b, ('v, 'l::{len}) array) Global_Store.ref \<Rightarrow>
+      ('s, nat, 'abort, 'i prompt, 'o prompt_output) function_body\<close> where
+  (*\<open>slice_len_array arr \<equiv> FunctionBody \<lbrakk>
+    return \<llangle>LENGTH('l)\<rrangle> ;
+\<rbrakk>\<close>*)
+  \<open>slice_len_array arr \<equiv> FunctionBody (literal LENGTH('l))\<close>
+
+definition slice_len_contract_array :: \<open>(('a, 'b) gref, 'b, ('t, 'l::{len}) array) focused \<Rightarrow> 'b \<Rightarrow>
+      ('t, 'l) array \<Rightarrow> share \<Rightarrow> ('s, nat, 'abort) function_contract\<close> where
+  [crush_contracts]: \<open>slice_len_contract_array ptr g arr sh \<equiv>
+    let pre = ptr \<mapsto>\<langle>sh\<rangle> g\<down>arr in
+    let post = \<lambda>r. ptr \<mapsto>\<langle>sh\<rangle> g\<down>arr \<star> \<langle> r = LENGTH('l)\<rangle> in
+      make_function_contract pre post\<close>
+ucincl_auto slice_len_contract_array
+
+lemma slice_len_spec_array [crush_specs]:
+  shows \<open>\<Gamma> ; slice_len_array ptr  \<Turnstile>\<^sub>F slice_len_contract_array ptr g arr sh\<close>
+  apply (crush_boot f: slice_len_array_def contract: slice_len_contract_array_def)
+  apply crush_base
+  done
+
+(* vector *)
+definition  slice_len_vector :: \<open>('a, 'b, ('v, 'l::{len}) vector) Global_Store.ref  \<Rightarrow>
+      ('s, nat, 'abort, 'i prompt, 'o prompt_output) function_body\<close> where
+  \<open>slice_len_vector vec \<equiv> FunctionBody \<lbrakk>
+    let v = *vec;
+    return \<llangle>vector_len v\<rrangle>;
+\<rbrakk>\<close>
+
+definition slice_len_contract_vector :: \<open>(('a, 'b) gref, 'b, ('t, 'l::{len}) vector) focused \<Rightarrow> 'b \<Rightarrow>
+      ('t, 'l) vector \<Rightarrow> share \<Rightarrow> ('s, nat, 'abort) function_contract\<close> where
+  [crush_contracts]: \<open>slice_len_contract_vector ptr g vec sh \<equiv>
+    let pre = ptr \<mapsto>\<langle>sh\<rangle> g\<down>vec in
+    let post = \<lambda>r. ptr \<mapsto>\<langle>sh\<rangle> g\<down>vec \<star> \<langle> r = vector_len vec\<rangle> in
+      make_function_contract pre post\<close>
+ucincl_auto slice_len_contract_vector
+
+lemma slice_len_spec_vector [crush_specs]:
+  shows \<open>\<Gamma> ; slice_len_vector ptr  \<Turnstile>\<^sub>F slice_len_contract_vector ptr g vec sh\<close>
+  apply (crush_boot f: slice_len_vector_def contract: slice_len_contract_vector_def)
+  apply crush_base
+  done
+
+adhoc_overloading slice_len_const \<rightleftharpoons>
+  slice_len
+  slice_len_array
+  slice_len_vector
 
 adhoc_overloading index_const \<rightleftharpoons>
   slice_index
