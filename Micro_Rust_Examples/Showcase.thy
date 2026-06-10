@@ -237,8 +237,7 @@ ucincl_auto len_list_test_contract
 lemma len_list_test_spec:
   shows \<open>\<Gamma>; len_list_test ptr \<Turnstile>\<^sub>F len_list_test_contract ptr g ls sh\<close>
   apply (crush_boot f: len_list_test_def contract: len_list_test_contract_def)
-  apply (crush_base specs add: slice_len_spec contracts add: slice_len_contract_def)
-  done
+  by crush_base
 
 text\<open>Test that \<^term>\<open>slice_len_array\<close> can be called and its specification composed.\<close>
 definition len_array_test :: \<open>('addr, 'gv, (nat, 'l::{len}) array) Global_Store.ref \<Rightarrow>
@@ -258,8 +257,7 @@ ucincl_auto len_array_test_contract
 lemma len_array_test_spec:
   shows \<open>\<Gamma>; len_array_test ptr \<Turnstile>\<^sub>F len_array_test_contract ptr g (arr :: (nat, 'l::{len}) array) sh\<close>
   apply (crush_boot f: len_array_test_def contract: len_array_test_contract_def)
-  apply (crush_base specs add: slice_len_spec_array contracts add: slice_len_contract_array_def)
-  done
+  by crush_base
 
 text\<open>Test that \<^term>\<open>slice_len_vector\<close> can be called and its specification composed.\<close>
 definition len_vector_test :: \<open>('addr, 'gv, (nat, 'l::{len}) vector) Global_Store.ref \<Rightarrow>
@@ -279,8 +277,7 @@ ucincl_auto len_vector_test_contract
 lemma len_vector_test_spec:
   shows \<open>\<Gamma>; len_vector_test ptr \<Turnstile>\<^sub>F len_vector_test_contract ptr g vec sh\<close>
   apply (crush_boot f: len_vector_test_def contract: len_vector_test_contract_def)
-  apply (crush_base specs add: slice_len_spec_vector contracts add: slice_len_contract_vector_def)
-  done
+  by crush_base
 
 section\<open>Further reading\<close>
 text\<open>This file did not further discuss the \<^verbatim>\<open>locale\<close>/\<^verbatim>\<open>context\<close> incantations
