@@ -86,54 +86,96 @@ qed
 
 subsection\<open>as_deref\<close>
 
-text\<open>On hold for now, might need as_ref to be implemented first.\<close>
+text\<open>Converts a shared reference to a \<^verbatim>\<open>Result\<close> whose \<^verbatim>\<open>Ok\<close> variant holds a reference into a \<^verbatim>\<open>Result\<close>
+ of shared references, coercing the inner reference to a shared reference to its target.\<close>
 
 context reference
 begin
 
-definition result_as_deref :: \<open>('a, 'b, (('c, 'd, 'v) ref, 'e) result) ref \<Rightarrow>
-    ('s, (('c, 'd, 'v) ref, ('a, 'b, 'e) ref) result, 'abort, 'i prompt, 'o prompt_output) function_body\<close> where
+definition result_as_deref :: \<open>('a, 'b, (('c, 'd, 'v) ref, 'e) result) ro_ref \<Rightarrow>
+    ('s, (('c, 'd, 'v) ro_ref, ('a, 'b, 'e) ro_ref) result, 'abort, 'i prompt, 'o prompt_output) function_body\<close> where
   \<open>result_as_deref self \<equiv> FunctionBody \<lbrakk>
     match *self {
-      Ok(_)  \<Rightarrow> Ok (*(\<llangle>focus_result_ok self\<rrangle>)),
-      Err(_) \<Rightarrow> Err (\<llangle>focus_result_err self\<rrangle>)
+      Ok(v)  \<Rightarrow> Ok (\<llangle>ro_ref_from_ref v\<rrangle>),
+      Err(_) \<Rightarrow> Err (\<llangle>focus_focused result_err_focus self\<rrangle>)
     }
   \<rbrakk>\<close>
 
 definition result_as_deref_contract ::
-  \<open>'b \<Rightarrow> share \<Rightarrow> ('a, 'b, (('c, 'd, 'v) ref, 'e) result) ref \<Rightarrow>
+  \<open>'b \<Rightarrow> share \<Rightarrow> ('a, 'b, (('c, 'd, 'v) ref, 'e) result) ro_ref \<Rightarrow>
    (('c, 'd, 'v) ref, 'e) result \<Rightarrow>
-   ('s::{sepalg}, (('c, 'd, 'v) ref, ('a, 'b, 'e) ref) result, 'abort) function_contract\<close> where
+   ('s::{sepalg}, (('c, 'd, 'v) ro_ref, ('a, 'b, 'e) ro_ref) result, 'abort) function_contract\<close> where
   [crush_contracts]: \<open>result_as_deref_contract g p self opt \<equiv>
-    let pre  = self \<mapsto>\<langle>p\<rangle> g\<down>opt;
-        post = \<lambda>res. self \<mapsto>\<langle>p\<rangle> g\<down>opt \<star> 
+    let pre  = (unsafe_ref_from_ro_ref self) \<mapsto>\<langle>p\<rangle> g\<down>opt;
+        post = \<lambda>res. (unsafe_ref_from_ro_ref self) \<mapsto>\<langle>p\<rangle> g\<down>opt \<star> 
             \<langle>res = (case opt of
-                      Ok(v)  \<Rightarrow> Ok(v)
-                    | Err(_) \<Rightarrow> Err(focus_result_err self))\<rangle>
+                      Ok(v)  \<Rightarrow> Ok(ro_ref_from_ref v)
+                    | Err(_) \<Rightarrow> Err(focus_focused result_err_focus self))\<rangle>
     in make_function_contract pre post\<close>
 ucincl_auto result_as_deref_contract
 
 lemma result_as_deref_spec [crush_specs]:
   shows \<open>\<Gamma>; result_as_deref self \<Turnstile>\<^sub>F result_as_deref_contract g p self opt\<close>
-  apply (crush_boot f: result_as_deref_def contract: result_as_deref_contract_def)
-  apply (crush_base simp add: split: result.splits)
-  apply (simp add: focus_view_def result_ok_focus.rep_eq make_focus_raw_via_view_modify_def)
-  done
+proof (crush_boot f: result_as_deref_def contract: result_as_deref_contract_def)
+qed (crush_base simp add: split: result.splits)
 
 end
 
 subsection\<open>as_deref_mut\<close>
 
+text\<open>Converts a mutable reference to a \<^verbatim>\<open>Result\<close> whose \<^verbatim>\<open>Ok\<close> variant holds a reference into a \<^verbatim>\<open>Result\<close> 
+of mutable references, returning the inner reference as the mutable dereference target.\<close>
+
+context reference
+begin
+adhoc_overloading store_update_const \<rightleftharpoons> update_fun
+
+definition result_as_deref_mut :: \<open>('a, 'b, (('c, 'd, 'v) ref, 'e) result) ref \<Rightarrow>
+    ('s, (('c, 'd, 'v) ref, ('a, 'b, 'e) ref) result, 'abort, 'i prompt, 'o prompt_output) function_body\<close> where
+  \<open>result_as_deref_mut self \<equiv> FunctionBody \<lbrakk>
+     match *self {
+       Ok(_)  \<Rightarrow> Ok (*(\<llangle>focus_result_ok self\<rrangle>)),
+       Err(_) \<Rightarrow> Err (\<llangle>focus_result_err self\<rrangle>)
+     }
+  \<rbrakk>\<close>
+
+definition result_as_deref_mut_contract ::
+  \<open>'b  \<Rightarrow> ('a, 'b, (('c, 'd, 'v) ref, 'e) result) ref \<Rightarrow>
+   (('c, 'd, 'v) ref, 'e) result \<Rightarrow>
+   ('s::{sepalg}, (('c, 'd, 'v) ref, ('a, 'b, 'e) ref) result, 'abort) function_contract\<close> where
+  [crush_contracts]: \<open>result_as_deref_mut_contract g self opt \<equiv>
+    let pre  = self \<mapsto>\<langle>\<top>\<rangle> g\<down>opt;
+        post = \<lambda>res. self \<mapsto>\<langle>\<top>\<rangle> g\<down>opt \<star> 
+            \<langle>res = (case opt of
+                      Ok(v)  \<Rightarrow> Ok(v)
+                    | Err(_) \<Rightarrow> Err(focus_focused result_err_focus self))\<rangle>
+    in make_function_contract pre post\<close>
+ucincl_auto result_as_deref_mut_contract
+
+no_adhoc_overloading store_update_const \<rightleftharpoons> update_fun
+
+lemma result_as_deref_mut_spec [crush_specs]:
+  shows \<open>\<Gamma>; result_as_deref_mut self \<Turnstile>\<^sub>F result_as_deref_mut_contract g self opt\<close>
+proof (crush_boot f: result_as_deref_mut_def contract: result_as_deref_mut_contract_def, goal_cases)
+  case 1
+  show ?case
+    proof (crush_base simp add: split: result.splits)
+    qed (simp add: focus_view_def result_ok_focus.rep_eq make_focus_raw_via_view_modify_def)
+qed
+
+end
+
 subsection\<open>as_mut\<close>
 
-text\<open>Returns a mutable reference to the values inside the mutable \<^verbatim>\<open>Result\<close> type.\<close>
+text\<open>Converts a mutable reference to a \<^verbatim>\<open>Result\<close> 
+into a \<^verbatim>\<open>Result\<close> of mutable references to the \<^verbatim>\<open>Ok\<close> or \<^verbatim>\<open>Err\<close> inner value.\<close>
 
 context reference
 begin       
 adhoc_overloading store_update_const \<rightleftharpoons> update_fun
 
-definition result_as_mut :: \<open>('a, 'b, ('v, 'e) result) Global_Store.ref \<Rightarrow>
-    ('s, (('a, 'b, 'v) Global_Store.ref, ('a, 'b, 'e) Global_Store.ref) result, 'abort, 'i prompt, 'o prompt_output) function_body\<close> where
+definition result_as_mut :: \<open>('a, 'b, ('v, 'e) result) ref \<Rightarrow>
+    ('s, (('a, 'b, 'v) ref, ('a, 'b, 'e) ref) result, 'abort, 'i prompt, 'o prompt_output) function_body\<close> where
   \<open>result_as_mut self \<equiv> FunctionBody \<lbrakk>
      match *self {
        Ok(_)  \<Rightarrow> Ok (\<llangle>focus_result_ok self\<rrangle>),
@@ -141,35 +183,30 @@ definition result_as_mut :: \<open>('a, 'b, ('v, 'e) result) Global_Store.ref \<
      }
   \<rbrakk>\<close>
 
-definition result_as_mut_contract :: \<open>'b \<Rightarrow> ('a, 'b, ('v, 'e) result) Global_Store.ref
-     \<Rightarrow> ('v, 'e) result \<Rightarrow> ('s::{sepalg}, (('a, 'b, 'v) Global_Store.ref, ('a, 'b, 'e) Global_Store.ref) result, 'abort) function_contract\<close> where
+definition result_as_mut_contract :: \<open>'b \<Rightarrow> ('a, 'b, ('v, 'e) result) ref
+     \<Rightarrow> ('v, 'e) result \<Rightarrow> ('s::{sepalg}, (('a, 'b, 'v) ref, ('a, 'b, 'e) ref) result, 'abort) function_contract\<close> where
   [crush_contracts]: \<open>result_as_mut_contract g ref opt \<equiv>
     let pre  = ref \<mapsto>\<langle>\<top>\<rangle> g\<down>opt;
         post = \<lambda>res. ref \<mapsto>\<langle>\<top>\<rangle> g\<down>opt \<star> 
-            \<langle>res = (if result_is_ok opt then
-                      Ok (focus_result_ok ref)
-                   else
-                      Err (focus_result_err ref))\<rangle>
+            \<langle>res = (case opt of
+                        Ok(_)  \<Rightarrow> Ok(focus_result_ok ref)
+                      | Err(_) \<Rightarrow> Err(focus_result_err ref))\<rangle>
     in make_function_contract pre post\<close>
 ucincl_auto result_as_mut_contract
 
 lemma result_as_mut_spec [crush_specs]:
   shows \<open>\<Gamma>; result_as_mut ref \<Turnstile>\<^sub>F result_as_mut_contract g ref opt\<close>
-  apply (crush_boot f: result_as_mut_def contract: result_as_mut_contract_def)
-  apply (crush_base simp add: result_is_ok_def split: result.splits)
-  done
+proof (crush_boot f: result_as_mut_def contract: result_as_mut_contract_def)
+qed (crush_base simp add: result_is_ok_def split: result.splits)
 
 no_adhoc_overloading store_update_const \<rightleftharpoons> update_fun
 
-(*<*)
 end
-(*>*)
 
 subsection\<open>as_ref\<close>
 
-text\<open>WIP - I'm not convinced that my understanding of the functions related to focus and ro_ref types
-are sufficient to ensure that this function and contract definition are sensible.
-TODO: REVISIT THIS BEFORE PR!\<close>
+text\<open>Converts a shared reference to a \<^verbatim>\<open>Result\<close> 
+into a \<^verbatim>\<open>Result\<close> of shared references to the \<^verbatim>\<open>Ok\<close> or \<^verbatim>\<open>Err\<close> inner value.\<close>
 
 context reference
 begin       
@@ -185,25 +222,21 @@ definition result_as_ref :: \<open>('a, 'b, ('v, 'e) result) ro_ref \<Rightarrow
 
 definition result_as_ref_contract :: \<open>'b \<Rightarrow> share \<Rightarrow> ('a, 'b, ('v, 'e) result) ro_ref
      \<Rightarrow> ('v, 'e) result \<Rightarrow> ('s::{sepalg}, (('a, 'b, 'v) ro_ref, ('a, 'b, 'e) ro_ref) result, 'abort) function_contract\<close> where
-  [crush_contracts]: \<open>result_as_ref_contract g p ref opt \<equiv>
-    let pre  = (unsafe_ref_from_ro_ref ref) \<mapsto>\<langle>p\<rangle> g\<down>opt;
-        post = \<lambda>res. (unsafe_ref_from_ro_ref ref) \<mapsto>\<langle>p\<rangle> g\<down>opt \<star> 
-            \<langle>res = (if result_is_ok opt then
-                      Ok (focus_focused result_ok_focus ref)
-                   else
-                      Err (focus_focused result_err_focus ref))\<rangle>
+  [crush_contracts]: \<open>result_as_ref_contract g p self opt \<equiv>
+    let pre  = (unsafe_ref_from_ro_ref self) \<mapsto>\<langle>p\<rangle> g\<down>opt;
+        post = \<lambda>res. (unsafe_ref_from_ro_ref self) \<mapsto>\<langle>p\<rangle> g\<down>opt \<star> 
+            \<langle>res = (case opt of
+                        Ok(_)  \<Rightarrow> Ok(focus_focused result_ok_focus self)
+                      | Err(_) \<Rightarrow> Err (focus_focused result_err_focus self))\<rangle>
     in make_function_contract pre post\<close>
 ucincl_auto result_as_ref_contract
 
 lemma result_as_ref_spec [crush_specs]:
-  shows \<open>\<Gamma>; result_as_ref ref \<Turnstile>\<^sub>F result_as_ref_contract g p ref opt\<close>
-  apply (crush_boot f: result_as_ref_def contract: result_as_ref_contract_def)
-  apply (crush_base simp add: result_is_ok_def split: result.splits)
-  done
+  shows \<open>\<Gamma>; result_as_ref self \<Turnstile>\<^sub>F result_as_ref_contract g p self opt\<close>
+proof (crush_boot f: result_as_ref_def contract: result_as_ref_contract_def)
+qed (crush_base simp add: result_is_ok_def split: result.splits)
 
-(*<*)
 end
-(*>*)
 
 subsection\<open>cloned\<close>
 
