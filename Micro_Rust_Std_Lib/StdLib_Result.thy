@@ -239,8 +239,39 @@ qed (crush_base simp add: result_is_ok_def split: result.splits)
 end
 
 subsection\<open>cloned\<close>
+text\<open>Takes a \<^verbatim>\<open>Result\<close> type with a shared reference (ro_ref) in the \<^verbatim>\<open>ok\<close> constructor and returns a
+ \<^verbatim>\<open>Result\<close> type with simply the value of the reference in the \<^verbatim>\<open>ok\<close> constructor.\<close>
+
+context reference
+begin 
+
+definition result_cloned :: \<open>(('a, 'b, 'v) ro_ref, 'e) result \<Rightarrow> 
+('s, ('v, 'e) result, 'abort, 'i prompt, 'o prompt_output) function_body\<close> where
+  \<open>result_cloned self \<equiv> FunctionBody \<lbrakk>
+    match self {
+      Ok(v)  \<Rightarrow> Ok(*v),
+      Err(e) \<Rightarrow> Err(e)
+    }
+  \<rbrakk>\<close>
+
+definition result_cloned_contract ::
+  \<open>'b \<Rightarrow> share \<Rightarrow> ('a, 'b, 'v) ro_ref \<Rightarrow> 'v \<Rightarrow>
+   (('a, 'b, 'v) ro_ref, 'e) result \<Rightarrow>
+   ('s::{sepalg}, ('v, 'e) result, 'abort) function_contract\<close> where
+  [crush_contracts]: \<open>result_cloned_contract g p r v self \<equiv>
+    let pre  = (unsafe_ref_from_ro_ref r) \<mapsto>\<langle>p\<rangle> g\<down>v \<star> \<langle>self = Ok (r)\<rangle>;
+        post = \<lambda>res. (unsafe_ref_from_ro_ref r) \<mapsto>\<langle>p\<rangle> g\<down>v \<star> \<langle>res = Ok (v)\<rangle>
+    in make_function_contract pre post\<close>
+ucincl_auto result_cloned_contract
+
+lemma result_cloned_spec [crush_specs]:
+  shows \<open>\<Gamma>; result_cloned self \<Turnstile>\<^sub>F result_cloned_contract g p r v self\<close>
+  by (crush_boot f: result_cloned_def contract: result_cloned_contract_def) crush_base
+
+end
 
 subsection\<open>copied\<close>
+text\<open>Identical to cloned for the purposes of use in µRust\<close>
 
 subsection\<open>err\<close>
 
@@ -297,7 +328,53 @@ lemma result_expect_spec [crush_specs]:
 
 subsection\<open>expect_err\<close>
 
+text\<open>Returns \<^verbatim>\<open>x\<close> if the element of \<^verbatim>\<open>Result\<close> type is of the form \<^verbatim>\<open>Err x\<close>. Panics otherwise with
+the defined error message.\<close>
+
+definition result_expect_err :: \<open>('v, 'e) result \<Rightarrow> String.literal \<Rightarrow> ('s, 'e, 'abort, 'i, 'o) function_body\<close> where
+  \<open>result_expect_err self msg \<equiv> FunctionBody \<lbrakk>
+      match self {
+        Ok(_) \<Rightarrow> panic!(msg),
+        Err(e) \<Rightarrow> e 
+      }
+  \<rbrakk>\<close>
+
+definition result_expect_err_contract :: 
+  \<open>('a, 'e) result \<Rightarrow> 'e \<Rightarrow> ('s::{sepalg}, 'e, 'abort) function_contract\<close>
+  where [crush_contracts]: \<open>result_expect_err_contract self e \<equiv>
+    let pre = \<langle>self = Err e\<rangle>; post = \<lambda>r. \<langle>r = e\<rangle>
+    in make_function_contract pre post\<close>
+ucincl_auto result_expect_err_contract
+
+lemma result_expect_err_spec [crush_specs]:
+  shows \<open>\<Gamma>; result_expect_err res m \<Turnstile>\<^sub>F result_expect_err_contract res e\<close>
+  by (crush_boot f: result_expect_err_def contract: result_expect_err_contract_def)
+     (crush_base split!: result.splits)
+
 subsection\<open>flatten\<close>
+text\<open>\<close>
+
+definition result_flatten :: 
+\<open>(('v, 'e) result, 'e) result \<Rightarrow> ('s, ('v, 'e) result, 'abort, 'i, 'o) function_body\<close> where
+  \<open>result_flatten self \<equiv> FunctionBody \<lbrakk>
+    match self {
+      Ok(v)  \<Rightarrow> v,
+      Err(e) \<Rightarrow> Err(e)
+    }
+  \<rbrakk>\<close>
+
+definition result_flatten_contract ::
+  \<open>(('v, 'e) result, 'e) result \<Rightarrow> ('s::{sepalg}, ('v, 'e) result, 'abort) function_contract\<close>
+  where [crush_contracts]: \<open>result_flatten_contract self \<equiv>
+    let pre  = UNIV;
+        post = \<lambda>r. \<langle>r = (case self of Ok v \<Rightarrow> v | Err e \<Rightarrow> Err e)\<rangle>
+    in make_function_contract pre post\<close>
+ucincl_auto result_flatten_contract
+
+lemma result_flatten_spec [crush_specs]:
+  shows \<open>\<Gamma>; result_flatten self \<Turnstile>\<^sub>F result_flatten_contract self\<close>
+  by (crush_boot f: result_flatten_def contract: result_flatten_contract_def)
+  (crush_base split!: result.splits)
 
 subsection\<open>inspect\<close>
 
