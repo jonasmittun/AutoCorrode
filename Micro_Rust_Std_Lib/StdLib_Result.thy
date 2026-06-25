@@ -352,7 +352,8 @@ lemma result_expect_err_spec [crush_specs]:
      (crush_base split!: result.splits)
 
 subsection\<open>flatten\<close>
-text\<open>\<close>
+text\<open>Takes a type \<^verbatim>\<open>Result\<close> that contains another \<^verbatim>\<open>Result\<close> in its \<^verbatim>\<open>Ok\<close> constructor and 
+returns the inner result on the \<^verbatim>\<open>Ok\<close> branch, otherwise returns self.\<close>
 
 definition result_flatten :: 
 \<open>(('v, 'e) result, 'e) result \<Rightarrow> ('s, ('v, 'e) result, 'abort, 'i, 'o) function_body\<close> where
@@ -377,12 +378,134 @@ lemma result_flatten_spec [crush_specs]:
   (crush_base split!: result.splits)
 
 subsection\<open>inspect\<close>
+text\<open>Takes a type \<^verbatim>\<open>Result\<close> and a function \<close>
+
+definition result_inspect :: \<open>('v, 'e) result \<Rightarrow> 
+('v \<Rightarrow> ('s, 'f, 'abort, 'i, 'o) function_body) \<Rightarrow>
+('s, ('v, 'e) result, 'abort, 'i, 'o) function_body\<close> where
+ \<open>result_inspect self f \<equiv> FunctionBody \<lbrakk>
+    match self {
+      Ok(v)  \<Rightarrow> {
+                  f(v);
+                  Ok(v)
+                },
+      Err(e) \<Rightarrow> Err(e)
+    }
+  \<rbrakk>\<close>
+
+definition result_inspect_contract ::
+  \<open>('v, 'e) result \<Rightarrow> ('v \<Rightarrow> 'f) \<Rightarrow> ('machine::sepalg, 'abort, 'i, 'o) striple_context \<Rightarrow>
+  ('v \<Rightarrow> ('machine, 'f, 'abort, 'i prompt, 'o prompt_output) function_body) \<Rightarrow>
+  ('machine, ('v, 'e) result, 'abort) function_contract\<close> where
+  [crush_contracts]: \<open>result_inspect_contract self pure_fun \<Gamma> rust_fun \<equiv>
+    let pre  = \<langle>\<forall> i. \<Gamma>; rust_fun i \<Turnstile>\<^sub>F lift_pure_to_contract (pure_fun i)\<rangle>;
+        post = \<lambda>r. \<langle>r = self\<rangle>
+    in make_function_contract pre post\<close>
+ucincl_auto result_inspect_contract
+
+lemma result_inspect_spec [crush_specs]:
+  shows \<open>\<Gamma>; result_inspect self rust_fun \<Turnstile>\<^sub>F result_inspect_contract self pure_fun \<Gamma> rust_fun\<close>
+proof (crush_boot f: result_inspect_def contract: result_inspect_contract_def, goal_cases)
+  case 1
+  note rust_fun_spec = this[THEN spec]
+  show ?case
+  proof (cases self)
+    case (Ok x1)
+    then show ?thesis by (crush_base specs add: rust_fun_spec)
+  next
+    case (Err x2)
+    then show ?thesis by crush_base
+  qed
+qed
 
 subsection\<open>inspect_err\<close>
+text\<open>Takes a type \<^verbatim>\<open>Result\<close> and a function \<close>
+
+definition result_inspect_err :: \<open>('v, 'e) result \<Rightarrow> 
+('e \<Rightarrow> ('s, 'f, 'abort, 'i, 'o) function_body) \<Rightarrow>
+('s, ('v, 'e) result, 'abort, 'i, 'o) function_body\<close> where
+ \<open>result_inspect_err self f \<equiv> FunctionBody \<lbrakk>
+    match self {
+      Ok(v)  \<Rightarrow> Ok(v),
+      Err(e) \<Rightarrow> {
+                  f(e);
+                  Err(e)
+                }
+    }
+  \<rbrakk>\<close>
+
+definition result_inspect_err_contract ::
+  \<open>('v, 'e) result \<Rightarrow> ('e \<Rightarrow> 'f) \<Rightarrow> ('machine::sepalg, 'abort, 'i, 'o) striple_context \<Rightarrow>
+  ('e \<Rightarrow> ('machine, 'f, 'abort, 'i prompt, 'o prompt_output) function_body) \<Rightarrow>
+  ('machine, ('v, 'e) result, 'abort) function_contract\<close> where
+  [crush_contracts]: \<open>result_inspect_err_contract self pure_fun \<Gamma> rust_fun \<equiv>
+    let pre  = \<langle>\<forall> i. \<Gamma>; rust_fun i \<Turnstile>\<^sub>F lift_pure_to_contract (pure_fun i)\<rangle>;
+        post = \<lambda>r. \<langle>r = self\<rangle>
+    in make_function_contract pre post\<close>
+ucincl_auto result_inspect_err_contract
+
+lemma result_inspect_err_spec [crush_specs]:
+  shows \<open>\<Gamma>; result_inspect_err self rust_fun \<Turnstile>\<^sub>F result_inspect_err_contract self pure_fun \<Gamma> rust_fun\<close>
+proof (crush_boot f: result_inspect_err_def contract: result_inspect_err_contract_def, goal_cases)
+  case 1
+  note rust_fun_spec = this[THEN spec]
+  show ?case
+  proof (cases self)
+    case (Ok x1)
+    then show ?thesis by crush_base
+  next
+    case (Err x2)
+    then show ?thesis by (crush_base specs add: rust_fun_spec)
+  qed
+qed
 
 subsection\<open>into_err\<close>
+text\<open>Something\<close>
+
+definition result_into_err :: \<open>('v, 'e) result \<Rightarrow> ('s, 'e, 'abort, 'i, 'o) function_body\<close> where
+  \<open>result_into_err self \<equiv> FunctionBody \<lbrakk>
+    match self {
+      Ok(_)  \<Rightarrow> panic!("This should be unreachable"),
+      Err(e) \<Rightarrow> e
+    }
+  \<rbrakk>\<close>
+
+definition result_into_err_contract :: 
+  \<open>('v, 'e) result \<Rightarrow> 'e \<Rightarrow> ('s::{sepalg}, 'e, 'abort) function_contract\<close> 
+  where [crush_contracts]: \<open>result_into_err_contract self e \<equiv>
+    let pre  = \<langle>self = Err e\<rangle>;
+        post = \<lambda>r. \<langle>r = e\<rangle>
+    in make_function_contract pre post\<close>
+ucincl_auto result_into_err_contract
+
+lemma result_into_err_spec [crush_specs]:
+  shows \<open>\<Gamma>; result_into_err self \<Turnstile>\<^sub>F result_into_err_contract self e\<close>
+  by (crush_boot f: result_into_err_def contract: result_into_err_contract_def)
+  (crush_base)
 
 subsection\<open>into_ok\<close>
+text\<open>Something\<close>
+
+definition result_into_ok :: \<open>('v, 'e) result \<Rightarrow> ('s, 'v, 'abort, 'i, 'o) function_body\<close> where
+  \<open>result_into_ok self \<equiv> FunctionBody \<lbrakk>
+    match self {
+      Ok(v)  \<Rightarrow> v,
+      Err(_) \<Rightarrow> panic!("This should be unreachable")
+    }
+  \<rbrakk>\<close>
+
+definition result_into_ok_contract :: 
+  \<open>('v, 'e) result \<Rightarrow> 'v \<Rightarrow> ('s::{sepalg}, 'v, 'abort) function_contract\<close> 
+  where [crush_contracts]: \<open>result_into_ok_contract self v \<equiv>
+    let pre  = \<langle>self = Ok v\<rangle>;
+        post = \<lambda>r. \<langle>r = v\<rangle>
+    in make_function_contract pre post\<close>
+ucincl_auto result_into_ok_contract
+
+lemma result_into_ok_spec [crush_specs]:
+  shows \<open>\<Gamma>; result_into_ok self \<Turnstile>\<^sub>F result_into_ok_contract self v\<close>
+  by (crush_boot f: result_into_ok_def contract: result_into_ok_contract_def)
+  (crush_base)
 
 subsection\<open>is_err\<close>
 
