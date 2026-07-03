@@ -511,7 +511,7 @@ subsection\<open>is_err\<close>
 
 text\<open>Tests whether an element of \<^verbatim>\<open>Result\<close> type is the \<^verbatim>\<open>Err\<close> constructor:\<close>
 
-definition urust_func_result_is_err :: \<open>('v,'e) result \<Rightarrow> ('s, bool, 'abort, 'i, 'o) function_body\<close> where
+definition urust_func_result_is_err :: \<open>('v, 'e) result \<Rightarrow> ('s, bool, 'abort, 'i, 'o) function_body\<close> where
   \<open>urust_func_result_is_err self \<equiv> FunctionBody \<lbrakk>
      match self {
        Ok(_) \<Rightarrow> False,
@@ -533,6 +533,42 @@ lemma result_is_err_spec [crush_specs]:
      (crush_base simp add: result_is_err_def split!: result.splits)
 
 subsection\<open>is_err_and\<close>
+text\<open>Tests whether an element of \<^verbatim>\<open>Result\<close> type is the \<^verbatim>\<open>Err\<close> constructor 
+and matches the supplied predicate.\<close>
+
+definition result_is_err_and :: \<open>('v, 'e) result \<Rightarrow> 
+('e \<Rightarrow> ('s, bool, 'abort, 'i, 'o) function_body) \<Rightarrow> ('s, bool, 'abort, 'i, 'o) function_body\<close> where
+  \<open>result_is_err_and self f \<equiv> FunctionBody \<lbrakk>
+    match self {
+      Ok(_)  \<Rightarrow> False,
+      Err(e) \<Rightarrow> f(e)
+    }
+  \<rbrakk>\<close>
+
+definition result_is_err_and_contract ::
+  \<open>('v, 'e) result \<Rightarrow> ('e \<Rightarrow> bool) \<Rightarrow> ('machine::sepalg, 'abort, 'i, 'o) striple_context \<Rightarrow>
+  ('e \<Rightarrow> ('machine, bool, 'abort, 'i prompt, 'o prompt_output) function_body) \<Rightarrow>
+  ('machine, bool, 'abort) function_contract\<close> 
+  where [crush_contracts]: \<open>result_is_err_and_contract self pure_fun \<Gamma> rust_fun \<equiv>
+    let pre  = \<langle>\<forall> i. \<Gamma>; rust_fun i \<Turnstile>\<^sub>F lift_pure_to_contract (pure_fun i)\<rangle>;
+        post = \<lambda>r. \<langle>r = (case self of Err(e) \<Rightarrow> (pure_fun e) | Ok(v) \<Rightarrow> False)\<rangle>
+    in make_function_contract pre post\<close>
+ucincl_auto result_is_err_and_contract
+
+lemma result_is_err_and_spec [crush_specs]:
+  shows \<open>\<Gamma>; result_is_err_and self rust_fun \<Turnstile>\<^sub>F result_is_err_and_contract self pure_fun \<Gamma> rust_fun\<close>
+proof (crush_boot f: result_is_err_and_def contract: result_is_err_and_contract_def, goal_cases)
+  case 1
+  note rust_fun_spec = this[THEN spec]
+  show ?case
+  proof (cases self)
+    case (Ok x1)
+    then show ?thesis by crush_base
+  next
+    case (Err x2)
+    then show ?thesis by (crush_base specs add: rust_fun_spec)
+  qed
+qed
 
 subsection\<open>is_ok\<close>
 
@@ -560,12 +596,137 @@ lemma result_is_ok_spec [crush_specs]:
      (crush_base simp add: result_is_ok_def split!: result.splits)
 
 subsection\<open>is_ok_and\<close>
+text\<open>Tests whether an element of \<^verbatim>\<open>Result\<close> type is the \<^verbatim>\<open>Ok\<close> constructor 
+and matches the supplied predicate.\<close>
+
+definition result_is_ok_and :: \<open>('v, 'e) result \<Rightarrow> 
+('v \<Rightarrow> ('s, bool, 'abort, 'i, 'o) function_body) \<Rightarrow> ('s, bool, 'abort, 'i, 'o) function_body\<close> where
+  \<open>result_is_ok_and self f \<equiv> FunctionBody \<lbrakk>
+    match self {
+      Ok(v)  \<Rightarrow> f(v),
+      Err(_) \<Rightarrow> False
+    }
+  \<rbrakk>\<close>
+
+definition result_is_ok_and_contract ::
+  \<open>('v, 'e) result \<Rightarrow> ('v \<Rightarrow> bool) \<Rightarrow> ('machine::sepalg, 'abort, 'i, 'o) striple_context \<Rightarrow>
+  ('v \<Rightarrow> ('machine, bool, 'abort, 'i prompt, 'o prompt_output) function_body) \<Rightarrow>
+  ('machine, bool, 'abort) function_contract\<close> 
+  where [crush_contracts]: \<open>result_is_ok_and_contract self pure_fun \<Gamma> rust_fun \<equiv>
+    let pre  = \<langle>\<forall> i. \<Gamma>; rust_fun i \<Turnstile>\<^sub>F lift_pure_to_contract (pure_fun i)\<rangle>;
+        post = \<lambda>r. \<langle>r = (case self of Err(e) \<Rightarrow> False | Ok(v) \<Rightarrow> (pure_fun v))\<rangle>
+    in make_function_contract pre post\<close>
+ucincl_auto result_is_ok_and_contract
+
+lemma result_is_ok_and_spec [crush_specs]:
+  shows \<open>\<Gamma>; result_is_ok_and self rust_fun \<Turnstile>\<^sub>F result_is_ok_and_contract self pure_fun \<Gamma> rust_fun\<close>
+proof (crush_boot f: result_is_ok_and_def contract: result_is_ok_and_contract_def, goal_cases)
+  case 1
+  note rust_fun_spec = this[THEN spec]
+  show ?case
+  proof (cases self)
+    case (Ok x1)
+    then show ?thesis by (crush_base specs add: rust_fun_spec)
+  next
+    case (Err x2)
+    then show ?thesis by crush_base
+  qed
+qed
 
 subsection\<open>iter\<close>
 
+text\<open>Returns an iterator over the possibly contained value, yielding \<^verbatim>\<open>Ok\<close>'s payload as a
+single element, or nothing for \<^verbatim>\<open>Err\<close>.\<close>
+
+definition result_iter :: \<open>('v, 'e) result \<Rightarrow>
+  ('s, ('s, 'v, 'abort, 'i prompt, 'o prompt_output) iterator, 'abort, 'i prompt, 'o prompt_output) function_body\<close> where
+  \<open>result_iter self \<equiv> FunctionBody \<lbrakk>
+    \<llangle>make_iterator_from_list (case self of Ok v \<Rightarrow> [v] | Err _ \<Rightarrow> [])\<rrangle>
+  \<rbrakk>\<close>
+
+definition result_iter_contract :: \<open>('v, 'e) result \<Rightarrow>
+  ('s::{sepalg}, ('s, 'v, 'abort, 'i prompt, 'o prompt_output) iterator, 'abort) function_contract\<close> where
+  [crush_contracts]: \<open>result_iter_contract self \<equiv>
+    let pre  = UNIV;
+        post = \<lambda>r. \<langle>r = make_iterator_from_list (case self of Ok v \<Rightarrow> [v] | Err _ \<Rightarrow> [])\<rangle>
+    in make_function_contract pre post\<close>
+ucincl_auto result_iter_contract
+
+lemma result_iter_spec [crush_specs]:
+  shows \<open>\<Gamma>; result_iter self \<Turnstile>\<^sub>F result_iter_contract self\<close>
+  by (crush_boot f: result_iter_def contract: result_iter_contract_def) crush_base
+
 subsection\<open>iter_mut\<close>
+text\<open>Returns a mutable iterator over the possibly contained value, yielding \<^verbatim>\<open>Ok\<close>'s payload as a
+mutable reference to the single element, or nothing for \<^verbatim>\<open>Err\<close>.\<close>
+
+context reference
+begin
+
+definition result_iter_mut :: \<open>('a, 'b, ('v, 'e) result) ref \<Rightarrow>
+  ('s, ('s, ('a, 'b, 'v) ref, 'abort, 'i prompt, 'o prompt_output) iterator, 'abort, 'i prompt, 'o prompt_output) function_body\<close> where
+  \<open>result_iter_mut self \<equiv> FunctionBody \<lbrakk>
+    match *self {
+      Ok(_)  \<Rightarrow> \<llangle>make_iterator_from_list [(focus_result_ok self)]\<rrangle>,
+      Err(_) \<Rightarrow> \<llangle>make_iterator_from_list []\<rrangle>
+    }
+  \<rbrakk>\<close>
+
+definition result_iter_mut_contract :: \<open>'b \<Rightarrow> ('a, 'b, ('v, 'e) result) ref \<Rightarrow> ('v, 'e) result \<Rightarrow>
+  ('s::{sepalg}, ('s, ('a, 'b, 'v) ref, 'abort, 'i prompt, 'o prompt_output) iterator, 'abort) function_contract\<close> where
+  [crush_contracts]: \<open>result_iter_mut_contract g self opt \<equiv>
+    let pre  = self \<mapsto>\<langle>\<top>\<rangle> g\<down>opt;
+        post = \<lambda>res. self \<mapsto>\<langle>\<top>\<rangle> g\<down>opt \<star> 
+          \<langle>res = (case opt of 
+            Ok _  \<Rightarrow> make_iterator_from_list [focus_focused result_ok_focus self] | 
+            Err _ \<Rightarrow> make_iterator_from_list [])\<rangle>
+    in make_function_contract pre post\<close>
+ucincl_auto result_iter_mut_contract
+
+lemma result_iter_mut_spec [crush_specs]:
+  shows \<open>\<Gamma>; result_iter_mut self \<Turnstile>\<^sub>F result_iter_mut_contract g self opt\<close>
+proof (crush_boot f: result_iter_mut_def contract: result_iter_mut_contract_def)
+qed (crush_base simp add: fun_literal_def split: result.splits)
+
+end
 
 subsection\<open>map\<close>
+text\<open>Maps a function to the \<^verbatim>\<open>Ok\<close> constructor of the \<^verbatim>\<open>Result\<close> type.\<close>
+
+definition result_map :: \<open>('a, 'e) result \<Rightarrow> ('a \<Rightarrow> ('machine, 'f, 'abort, 'i, 'o) function_body) \<Rightarrow>
+    ('machine, ('f, 'e) result, 'abort, 'i, 'o) function_body\<close> where
+  \<open>result_map x f \<equiv> FunctionBody \<lbrakk>
+     match x {
+       Ok(a)  \<Rightarrow> Ok(f(a)),
+       Err(e) \<Rightarrow> Err(e)
+     }
+  \<rbrakk>\<close>
+
+definition result_map_contract :: \<open>('a, 'e) result \<Rightarrow> ('a \<Rightarrow> 'f) \<Rightarrow> 
+('machine::sepalg, 'abort, 'i, 'o) striple_context \<Rightarrow>
+('a \<Rightarrow> ('machine, 'f, 'abort, 'i prompt, 'o prompt_output) function_body) \<Rightarrow>
+('machine, ('f, 'e) result, 'abort) function_contract\<close> where
+  [crush_contracts]: \<open>result_map_contract res pure_fun \<Gamma> rust_fun \<equiv>
+    let pre  = \<langle>\<forall> i. \<Gamma>; rust_fun i \<Turnstile>\<^sub>F lift_pure_to_contract (pure_fun i)\<rangle>;
+        post = \<lambda>r. \<langle>r = (case res of Err(e) \<Rightarrow> Err(e) | Ok(k) \<Rightarrow> Ok(pure_fun k))\<rangle>
+    in make_function_contract pre post\<close>
+ucincl_auto result_map_contract
+
+
+lemma result_map_spec [crush_specs]:
+  shows \<open>\<Gamma>; result_map res rust_fun \<Turnstile>\<^sub>F result_map_contract res pure_fun \<Gamma> rust_fun\<close>
+proof (crush_boot f: result_map_def contract: result_map_contract_def, goal_cases)
+  case 1
+  note rust_fun_spec = this[THEN spec]
+  show ?case
+  proof (cases res)
+    case (Ok x1)
+    then show ?thesis by (crush_base specs add: rust_fun_spec)
+  next
+    case (Err x2)
+    then show ?thesis by crush_base
+  qed
+qed
 
 subsection\<open>map_err\<close>
 
@@ -607,10 +768,92 @@ proof (crush_boot f: result_map_err_def contract: result_map_err_contract_def, g
 qed
 
 subsection\<open>map_or\<close>
+text\<open>Applies a function to the contained value if \<^verbatim>\<open>Result\<close> is \<^verbatim>\<open>Ok\<close> and returns the resulting value.
+Else, if \<^verbatim>\<open>Result\<close> is \<^verbatim>\<open>Err\<close>, returns the supplied default value.\<close>
+
+definition result_map_or :: \<open>('v, 'e) result \<Rightarrow> 'f \<Rightarrow>
+    ('v \<Rightarrow> ('machine, 'f, 'abort, 'i, 'o) function_body) \<Rightarrow>
+    ('machine, 'f, 'abort, 'i, 'o) function_body\<close> where
+  \<open>result_map_or self d f \<equiv> FunctionBody \<lbrakk>
+     match self {
+       Ok(v)  \<Rightarrow> f(v),
+       Err(_) \<Rightarrow> d
+     }
+  \<rbrakk>\<close>
+
+definition result_map_or_contract :: \<open>('v, 'e) result \<Rightarrow> 'f \<Rightarrow> ('v \<Rightarrow> 'f) \<Rightarrow> 
+('machine::sepalg, 'abort, 'i, 'o) striple_context \<Rightarrow>
+('v \<Rightarrow> ('machine, 'f, 'abort, 'i prompt, 'o prompt_output) function_body) \<Rightarrow>
+('machine, 'f, 'abort) function_contract\<close> where
+  [crush_contracts]: \<open>result_map_or_contract self d pure_fun \<Gamma> rust_fun \<equiv>
+    let pre  = \<langle>\<forall> i. \<Gamma>; rust_fun i \<Turnstile>\<^sub>F lift_pure_to_contract (pure_fun i)\<rangle>;
+        post = \<lambda>r. \<langle>r = (case self of Err(e) \<Rightarrow> d | Ok(v) \<Rightarrow> pure_fun v)\<rangle>
+    in make_function_contract pre post\<close>
+ucincl_auto result_map_or_contract
+
+
+lemma result_map_or_spec [crush_specs]:
+  shows \<open>\<Gamma>; result_map_or self d rust_fun \<Turnstile>\<^sub>F result_map_or_contract self d pure_fun \<Gamma> rust_fun\<close>
+proof (crush_boot f: result_map_or_def contract: result_map_or_contract_def, goal_cases)
+  case 1
+  note rust_fun_spec = this[THEN spec]
+  show ?case
+  proof (cases self)
+    case (Ok x1)
+    then show ?thesis by (crush_base specs add: rust_fun_spec)
+  next
+    case (Err x2)
+    then show ?thesis by crush_base
+  qed
+qed
 
 subsection\<open>map_or_default\<close>
+text\<open>Default values are not implemented for µRust types, therefore result_map_or is the closest
+functional equivalent and should be used in place of result_map_or_default.\<close>
 
 subsection\<open>map_or_else\<close>
+text\<open>Applies a function to the contained value if \<^verbatim>\<open>Result\<close> is \<^verbatim>\<open>Ok\<close> and returns the resulting value.
+Else, if \<^verbatim>\<open>Result\<close> is \<^verbatim>\<open>Err\<close>, same as for \<^verbatim>\<open>Ok\<close> but with another function for the contained \<^verbatim>\<open>Err\<close> value.\<close>
+
+definition result_map_or_else :: \<open>('v, 'e) result \<Rightarrow>
+    ('e \<Rightarrow> ('machine, 'f, 'abort, 'i, 'o) function_body) \<Rightarrow>
+    ('v \<Rightarrow> ('machine, 'f, 'abort, 'i, 'o) function_body) \<Rightarrow>
+    ('machine, 'f, 'abort, 'i, 'o) function_body\<close> where
+  \<open>result_map_or_else self d f \<equiv> FunctionBody \<lbrakk>
+     match self {
+       Ok(v)  \<Rightarrow> f(v),
+       Err(e) \<Rightarrow> d(e)
+     }
+  \<rbrakk>\<close>
+
+definition result_map_or_else_contract :: \<open>('v, 'e) result \<Rightarrow> ('e \<Rightarrow> 'f) \<Rightarrow> ('v \<Rightarrow> 'f) \<Rightarrow> 
+('machine::sepalg, 'abort, 'i, 'o) striple_context \<Rightarrow>
+('e \<Rightarrow> ('machine, 'f, 'abort, 'i prompt, 'o prompt_output) function_body) \<Rightarrow>
+('v \<Rightarrow> ('machine, 'f, 'abort, 'i prompt, 'o prompt_output) function_body) \<Rightarrow>
+('machine, 'f, 'abort) function_contract\<close> where
+  [crush_contracts]: \<open>result_map_or_else_contract self pure_fun_def pure_fun \<Gamma> rust_fun_def rust_fun \<equiv>
+    let pre  = \<langle>\<forall> i. \<Gamma>; rust_fun i \<Turnstile>\<^sub>F lift_pure_to_contract (pure_fun i)\<rangle> \<star>
+               \<langle>\<forall> j. \<Gamma>; rust_fun_def j \<Turnstile>\<^sub>F lift_pure_to_contract (pure_fun_def j)\<rangle>;
+        post = \<lambda>r. \<langle>r = (case self of Err(e) \<Rightarrow> pure_fun_def e | Ok(v) \<Rightarrow> pure_fun v)\<rangle>
+    in make_function_contract pre post\<close>
+ucincl_auto result_map_or_else_contract
+
+
+lemma result_map_or_else_spec [crush_specs]:
+  shows \<open>\<Gamma>; result_map_or_else self rust_fun_def rust_fun \<Turnstile>\<^sub>F 
+            result_map_or_else_contract self pure_fun_def pure_fun \<Gamma> rust_fun_def rust_fun\<close>
+proof (crush_boot f: result_map_or_else_def contract: result_map_or_else_contract_def, goal_cases)
+  case 1
+  note rust_fun_spec = this[THEN spec]
+  show ?case
+  proof (cases self)
+    case (Ok x1)
+    then show ?thesis by (crush_base specs add: rust_fun_spec)
+  next
+    case (Err x2)
+    then show ?thesis by (crush_base specs add: rust_fun_spec)
+  qed
+qed
 
 subsection\<open>ok\<close>
 
