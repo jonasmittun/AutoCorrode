@@ -44,7 +44,6 @@ lemma array_index_spec [crush_specs]:
   shows \<open>\<Gamma> ; array_index lst idx \<Turnstile>\<^sub>F array_index_contract lst idx\<close>
   by (crush_boot f: array_index_def contract: array_index_contract_def) crush_base
 
-consts slice_len_const :: \<open>'a \<Rightarrow> ('s, nat, 'abort, 'i, 'o) function_body\<close>
 
 context reference begin
 
@@ -170,13 +169,16 @@ lemma list_index_range_spec [crush_specs]:
   by (crush_boot f: list_index_range_def contract: list_index_range_contract_def)
      (crush_base split!: range.splits; simp)
 
-text\<open>Slice builtin len function definitions for slices represented as list, array and vector.\<close>
+adhoc_overloading index_const \<rightleftharpoons>
+  slice_index
+  slice_index_array
+  slice_index_vector
+  \<comment>\<open>TODO: Add back in once subrange slices are working again: \<^verbatim>\<open>slice_index_range\<close>\<close>
 
-(* list *)
 definition slice_len :: \<open>('a, 'b, 'v list) Global_Store.ref \<Rightarrow>('s, nat, 'abort, 'i prompt, 'o prompt_output) function_body\<close> where
   \<open>slice_len r \<equiv> FunctionBody \<lbrakk>
     let ls = *r;
-    \<llangle>length\<rrangle>\<^sub>1(ls)
+    \<llangle>length ls\<rrangle>
 \<rbrakk>\<close>
 
 definition slice_len_contract :: \<open>(('a, 'b) gref, 'b, 'c list) focused \<Rightarrow> 'b \<Rightarrow> 'c list \<Rightarrow>
@@ -193,29 +195,28 @@ lemma slice_len_spec [crush_specs]:
   apply crush_base
   done
 
-(* array *)
+micro_rust_notation (call) slice_len ("len")
+
 definition slice_len_array :: \<open>('a, 'b, ('v, 'l::{len}) array) Global_Store.ref \<Rightarrow>
       ('s, nat, 'abort, 'i prompt, 'o prompt_output) function_body\<close> where
-  (*\<open>slice_len_array arr \<equiv> FunctionBody \<lbrakk>
-    return \<llangle>LENGTH('l)\<rrangle> ;
-\<rbrakk>\<close>*)
   \<open>slice_len_array arr \<equiv> FunctionBody (literal LENGTH('l))\<close>
 
-definition slice_len_contract_array :: \<open>(('a, 'b) gref, 'b, ('t, 'l::{len}) array) focused \<Rightarrow> 'b \<Rightarrow>
+definition slice_len_array_contract :: \<open>(('a, 'b) gref, 'b, ('t, 'l::{len}) array) focused \<Rightarrow> 'b \<Rightarrow>
       ('t, 'l) array \<Rightarrow> share \<Rightarrow> ('s, nat, 'abort) function_contract\<close> where
-  [crush_contracts]: \<open>slice_len_contract_array ptr g arr sh \<equiv>
+  [crush_contracts]: \<open>slice_len_array_contract ptr g arr sh \<equiv>
     let pre = ptr \<mapsto>\<langle>sh\<rangle> g\<down>arr in
     let post = \<lambda>r. ptr \<mapsto>\<langle>sh\<rangle> g\<down>arr \<star> \<langle> r = LENGTH('l)\<rangle> in
       make_function_contract pre post\<close>
-ucincl_auto slice_len_contract_array
+ucincl_auto slice_len_array_contract
 
 lemma slice_len_spec_array [crush_specs]:
-  shows \<open>\<Gamma> ; slice_len_array ptr  \<Turnstile>\<^sub>F slice_len_contract_array ptr g arr sh\<close>
-  apply (crush_boot f: slice_len_array_def contract: slice_len_contract_array_def)
+  shows \<open>\<Gamma> ; slice_len_array ptr  \<Turnstile>\<^sub>F slice_len_array_contract ptr g arr sh\<close>
+  apply (crush_boot f: slice_len_array_def contract: slice_len_array_contract_def)
   apply crush_base
   done
 
-(* vector *)
+micro_rust_notation (call) slice_len_array ("len")
+
 definition  slice_len_vector :: \<open>('a, 'b, ('v, 'l::{len}) vector) Global_Store.ref  \<Rightarrow>
       ('s, nat, 'abort, 'i prompt, 'o prompt_output) function_body\<close> where
   \<open>slice_len_vector vec \<equiv> FunctionBody \<lbrakk>
@@ -223,38 +224,30 @@ definition  slice_len_vector :: \<open>('a, 'b, ('v, 'l::{len}) vector) Global_S
     return \<llangle>vector_len v\<rrangle>;
 \<rbrakk>\<close>
 
-definition slice_len_contract_vector :: \<open>(('a, 'b) gref, 'b, ('t, 'l::{len}) vector) focused \<Rightarrow> 'b \<Rightarrow>
+definition slice_len_vector_contract :: \<open>(('a, 'b) gref, 'b, ('t, 'l::{len}) vector) focused \<Rightarrow> 'b \<Rightarrow>
       ('t, 'l) vector \<Rightarrow> share \<Rightarrow> ('s, nat, 'abort) function_contract\<close> where
-  [crush_contracts]: \<open>slice_len_contract_vector ptr g vec sh \<equiv>
+  [crush_contracts]: \<open>slice_len_vector_contract ptr g vec sh \<equiv>
     let pre = ptr \<mapsto>\<langle>sh\<rangle> g\<down>vec in
     let post = \<lambda>r. ptr \<mapsto>\<langle>sh\<rangle> g\<down>vec \<star> \<langle> r = vector_len vec\<rangle> in
       make_function_contract pre post\<close>
-ucincl_auto slice_len_contract_vector
+ucincl_auto slice_len_vector_contract
 
 lemma slice_len_spec_vector [crush_specs]:
-  shows \<open>\<Gamma> ; slice_len_vector ptr  \<Turnstile>\<^sub>F slice_len_contract_vector ptr g vec sh\<close>
-  apply (crush_boot f: slice_len_vector_def contract: slice_len_contract_vector_def)
+  shows \<open>\<Gamma> ; slice_len_vector ptr  \<Turnstile>\<^sub>F slice_len_vector_contract ptr g vec sh\<close>
+  apply (crush_boot f: slice_len_vector_def contract: slice_len_vector_contract_def)
   apply crush_base
   done
 
-adhoc_overloading slice_len_const \<rightleftharpoons>
-  slice_len
-  slice_len_array
-  slice_len_vector
-
-adhoc_overloading index_const \<rightleftharpoons>
-  slice_index
-  slice_index_array
-  slice_index_vector
-  \<comment>\<open>TODO: Add back in once subrange slices are working again: \<^verbatim>\<open>slice_index_range\<close>\<close>
-
-subsection\<open>Slice swap\<close>
+micro_rust_notation (call) slice_len_vector ("len")
 
 definition slice_swap :: \<open>('a, 'b, 'v list) Global_Store.ref \<Rightarrow> nat \<Rightarrow> nat \<Rightarrow>
     ('s, unit, 'abort, 'i prompt, 'o prompt_output) function_body\<close> where
   \<open>slice_swap r i j \<equiv> FunctionBody \<lbrakk>
     let xs = *r;
-    r = \<llangle>list_update (list_update xs i (xs ! j)) j (xs ! i)\<rrangle>
+    let vi = \<llangle>xs ! i\<rrangle>;
+    let vj = \<llangle>xs ! j\<rrangle>;
+    let xs' =\<llangle>list_update xs i vj\<rrangle>;
+    r = \<llangle>list_update xs' j vi\<rrangle>
   \<rbrakk>\<close>
 
 definition slice_swap_contract :: \<open>(('a, 'b) gref, 'b, 'v list) focused \<Rightarrow> 'b \<Rightarrow> 'v list \<Rightarrow>
@@ -267,9 +260,11 @@ ucincl_auto slice_swap_contract
 
 lemma slice_swap_spec [crush_specs]:
   shows \<open>\<Gamma> ; slice_swap ptr i j \<Turnstile>\<^sub>F slice_swap_contract ptr g ls i j\<close>
-  by (crush_boot f: slice_swap_def contract: slice_swap_contract_def) crush_base
+  apply (crush_boot f: slice_swap_def contract: slice_swap_contract_def) 
+  apply crush_base
+  done
 
-subsection\<open>Slice contains\<close>
+micro_rust_notation (call) slice_swap ("swap")
 
 definition slice_contains :: \<open>'v list \<Rightarrow> 'v \<Rightarrow>
     ('s, bool, 'abort, 'i prompt, 'o prompt_output) function_body\<close> where
@@ -285,9 +280,11 @@ ucincl_auto slice_contains_contract
 
 lemma slice_contains_spec [crush_specs]:
   shows \<open>\<Gamma> ; slice_contains xs v \<Turnstile>\<^sub>F slice_contains_contract xs v\<close>
-  by (crush_boot f: slice_contains_def contract: slice_contains_contract_def) crush_base
+  apply (crush_boot f: slice_contains_def contract: slice_contains_contract_def)
+  apply crush_base
+  done
 
-subsection\<open>Slice copy\_from\_slice\<close>
+micro_rust_notation (call) slice_contains ("contains")
 
 definition slice_copy_from_slice :: \<open>('a, 'b, 'v list) Global_Store.ref \<Rightarrow> 'v list \<Rightarrow>
     ('s, unit, 'abort, 'i prompt, 'o prompt_output) function_body\<close> where
@@ -305,9 +302,9 @@ ucincl_auto slice_copy_from_slice_contract
 
 lemma slice_copy_from_slice_spec [crush_specs]:
   shows \<open>\<Gamma> ; slice_copy_from_slice dst src \<Turnstile>\<^sub>F slice_copy_from_slice_contract dst g dst_ls src\<close>
-  by (crush_boot f: slice_copy_from_slice_def contract: slice_copy_from_slice_contract_def) crush_base
-
-subsection\<open>Slice reverse\<close>
+  apply (crush_boot f: slice_copy_from_slice_def contract: slice_copy_from_slice_contract_def)
+  apply crush_base
+  done
 
 definition slice_reverse :: \<open>('a, 'b, 'v list) Global_Store.ref \<Rightarrow>
     ('s, unit, 'abort, 'i prompt, 'o prompt_output) function_body\<close> where
@@ -326,9 +323,10 @@ ucincl_auto slice_reverse_contract
 
 lemma slice_reverse_spec [crush_specs]:
   shows \<open>\<Gamma> ; slice_reverse ptr \<Turnstile>\<^sub>F slice_reverse_contract ptr g ls\<close>
-  by (crush_boot f: slice_reverse_def contract: slice_reverse_contract_def) crush_base
+  apply (crush_boot f: slice_reverse_def contract: slice_reverse_contract_def)
+  apply crush_base
+  done
 
-subsection\<open>Slice fill\<close>
 
 definition slice_fill :: \<open>('a, 'b, 'v list) Global_Store.ref \<Rightarrow> 'v \<Rightarrow>
     ('s, unit, 'abort, 'i prompt, 'o prompt_output) function_body\<close> where
@@ -349,8 +347,6 @@ lemma slice_fill_spec [crush_specs]:
   shows \<open>\<Gamma> ; slice_fill ptr v \<Turnstile>\<^sub>F slice_fill_contract ptr g ls v\<close>
   by (crush_boot f: slice_fill_def contract: slice_fill_contract_def) crush_base
 
-subsection\<open>Slice split\_at\<close>
-
 definition slice_split_at :: \<open>'v list \<Rightarrow> nat \<Rightarrow>
     ('s, 'v list \<times> 'v list \<times> tnil, 'abort, 'i prompt, 'o prompt_output) function_body\<close> where
   \<open>slice_split_at xs mid \<equiv> FunctionBody \<lbrakk>
@@ -369,17 +365,18 @@ lemma slice_split_at_spec [crush_specs]:
   shows \<open>\<Gamma> ; slice_split_at xs mid \<Turnstile>\<^sub>F slice_split_at_contract xs mid\<close>
   by (crush_boot f: slice_split_at_def contract: slice_split_at_contract_def) crush_base
 
-subsection\<open>Vec push\<close>
-
 definition vec_push :: \<open>('a, 'b, ('v, 'l::{len}) vector) Global_Store.ref \<Rightarrow> 'v \<Rightarrow>
-    ('s, unit, 'abort, 'i prompt, 'o prompt_output) function_body\<close> where
+    ('s, (unit, 'v) result, 'abort, 'i prompt, 'o prompt_output) function_body\<close> where
   \<open>vec_push r v \<equiv> FunctionBody \<lbrakk>
     let xs = *r;
-    r = \<llangle>vector_push_raw v xs\<rrangle>
+    match \<llangle>vector_push v xs\<rrangle> {
+      Some(xs') \<Rightarrow> { r = xs'; Ok(())},
+      None \<Rightarrow> Err(v)
+    }
   \<rbrakk>\<close>
 
 definition vec_push_contract :: \<open>(('a, 'b) gref, 'b, ('v, 'l::{len}) vector) focused \<Rightarrow> 'b \<Rightarrow>
-    ('v, 'l) vector \<Rightarrow> 'v \<Rightarrow> ('s, unit, 'abort) function_contract\<close> where
+    ('v, 'l) vector \<Rightarrow> 'v \<Rightarrow> ('s, (unit, 'v) result, 'abort) function_contract\<close> where
   [crush_contracts]: \<open>vec_push_contract ptr g vs v \<equiv>
     let pre = ptr \<mapsto>\<langle>\<top>\<rangle> g\<down>vs \<star> \<langle>vector_len vs < LENGTH('l)\<rangle> in
     let post = \<lambda>_. ptr \<mapsto>\<langle>\<top>\<rangle> (\<lambda>_. vector_push_raw v vs) \<sqdot> (g\<down>vs) in
@@ -388,32 +385,44 @@ ucincl_auto vec_push_contract
 
 lemma vec_push_spec [crush_specs]:
   shows \<open>\<Gamma> ; vec_push ptr v \<Turnstile>\<^sub>F vec_push_contract ptr g vs v\<close>
-  by (crush_boot f: vec_push_def contract: vec_push_contract_def) crush_base
+  apply (crush_boot f: vec_push_def contract: vec_push_contract_def)
+  apply (unfold vector_push_def)
+  apply crush_base
+done
 
-subsection\<open>Vec pop\<close>
+micro_rust_notation (call) vec_push ("push")
 
 definition vec_pop :: \<open>('a, 'b, ('v, 'l::{len}) vector) Global_Store.ref \<Rightarrow>
-    ('s, 'v, 'abort, 'i prompt, 'o prompt_output) function_body\<close> where
+    ('s, 'v option, 'abort, 'i prompt, 'o prompt_output) function_body\<close> where
   \<open>vec_pop r \<equiv> FunctionBody \<lbrakk>
     let xs = *r;
-    r = \<llangle>vector_pop_raw xs\<rrangle>;
-    return \<llangle>vector_last xs\<rrangle>;
+    match \<llangle>vector_pop xs\<rrangle> {
+      Some(p) \<Rightarrow> { 
+        r = \<llangle>snd p\<rrangle>; 
+        Some(\<llangle>fst p\<rrangle>)
+      },
+      None \<Rightarrow> None
+  }
   \<rbrakk>\<close>
 
 definition vec_pop_contract :: \<open>(('a, 'b) gref, 'b, ('v, 'l::{len}) vector) focused \<Rightarrow> 'b \<Rightarrow>
-    ('v, 'l) vector \<Rightarrow> ('s, 'v, 'abort) function_contract\<close> where
+    ('v, 'l) vector \<Rightarrow> ('s, 'v option, 'abort) function_contract\<close> where
   [crush_contracts]: \<open>vec_pop_contract ptr g vs \<equiv>
     let pre = ptr \<mapsto>\<langle>\<top>\<rangle> g\<down>vs \<star> \<langle>vector_len vs > 0\<rangle> in
-    let post = \<lambda>r. ptr \<mapsto>\<langle>\<top>\<rangle> (\<lambda>_. vector_pop_raw vs) \<sqdot> (g\<down>vs) \<star>
-                   \<langle>r = vector_last vs\<rangle> in
+    let post = \<lambda>r. ptr \<mapsto>\<langle>\<top>\<rangle> (\<lambda>_. snd (the (vector_pop vs))) \<sqdot> (g\<down>vs) \<star>
+                   \<langle>r = Some (fst (the (vector_pop vs)))\<rangle> in
       make_function_contract pre post\<close>
 ucincl_auto vec_pop_contract
 
 lemma vec_pop_spec [crush_specs]:
   shows \<open>\<Gamma> ; vec_pop ptr \<Turnstile>\<^sub>F vec_pop_contract ptr g vs\<close>
-  by (crush_boot f: vec_pop_def contract: vec_pop_contract_def) crush_base
+  apply (crush_boot f: vec_pop_def contract: vec_pop_contract_def)
+  apply (unfold vector_pop_def)
+  apply crush_base
+  done
 
-subsection\<open>Slice sort\_by\<close>
+
+micro_rust_notation (call) vec_pop ("pop")
 
 definition slice_sort_by :: \<open>('a, 'b, ('v::linorder) list) Global_Store.ref \<Rightarrow>
     ('s, unit, 'abort, 'i prompt, 'o prompt_output) function_body\<close> where
