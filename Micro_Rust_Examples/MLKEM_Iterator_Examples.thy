@@ -10,8 +10,8 @@ begin
 
 text\<open>
   Demonstrations of MLKEM-style operations expressed using the verified iterator
-  combinators @{const iterator_map}, @{const iterator_fold_func}, and
-  @{const iterator_filter_func}. These show how loop-based cryptographic computations
+  combinators @{const iterator_map}, @{const iterator_fold}, and
+  @{const iterator_filter}. These show how loop-based cryptographic computations
   can be expressed compositionally and verified against pure specifications.
 \<close>
 
@@ -41,7 +41,7 @@ definition poly_filter_nonzero_pure :: \<open>16 word list \<Rightarrow> 16 word
 
 section\<open>Polynomial coefficient sum via fold\<close>
 
-text\<open>Sums all polynomial coefficients mod q using @{const iterator_fold_func}.
+text\<open>Sums all polynomial coefficients mod q using @{const iterator_fold}.
 This pattern is common in cryptographic hash computations and checksum operations.\<close>
 
 definition zq_add_rust :: \<open>16 word \<Rightarrow> 16 word \<Rightarrow>
@@ -68,15 +68,15 @@ lemma zq_add_rust_satisfies_lift:
 definition poly_coeff_sum :: \<open>16 word list \<Rightarrow>
     ('s, 16 word, 'abort, 'i prompt, 'o prompt_output) function_body\<close> where
   \<open>poly_coeff_sum coeffs \<equiv>
-    iterator_fold_func (make_iterator_from_list coeffs) 0 zq_add_rust\<close>
+    iterator_fold (make_iterator_from_list coeffs) 0 zq_add_rust\<close>
 
 definition poly_coeff_sum_contract where
-  [crush_contracts]: \<open>poly_coeff_sum_contract coeffs \<equiv>
+  [crush_contracts]: \<open>poly_coeff_sum_contract coeffs \<Gamma> \<equiv>
     iterator_fold_contract coeffs 0 zq_add \<Gamma> zq_add_rust\<close>
 ucincl_auto poly_coeff_sum_contract
 
 lemma poly_coeff_sum_spec [crush_specs]:
-  shows \<open>\<Gamma>; poly_coeff_sum coeffs \<Turnstile>\<^sub>F poly_coeff_sum_contract coeffs\<close>
+  shows \<open>\<Gamma>; poly_coeff_sum coeffs \<Turnstile>\<^sub>F poly_coeff_sum_contract coeffs \<Gamma>\<close>
   unfolding poly_coeff_sum_def poly_coeff_sum_contract_def
   by (rule iterator_fold_spec)
 
@@ -112,18 +112,18 @@ definition poly_scalar_mul :: \<open>16 word \<Rightarrow> 16 word list \<Righta
     iterator_map (make_iterator_from_list coeffs) (zq_scalar_mul_rust c)\<close>
 
 definition poly_scalar_mul_contract where
-  [crush_contracts]: \<open>poly_scalar_mul_contract c coeffs \<equiv>
+  [crush_contracts]: \<open>poly_scalar_mul_contract c coeffs \<Gamma> \<equiv>
     iterator_map_contract coeffs (zq_mul c) \<Gamma> (zq_scalar_mul_rust c)\<close>
 ucincl_auto poly_scalar_mul_contract
 
 lemma poly_scalar_mul_spec [crush_specs]:
-  shows \<open>\<Gamma>; poly_scalar_mul c coeffs \<Turnstile>\<^sub>F poly_scalar_mul_contract c coeffs\<close>
+  shows \<open>\<Gamma>; poly_scalar_mul c coeffs \<Turnstile>\<^sub>F poly_scalar_mul_contract c coeffs \<Gamma>\<close>
   unfolding poly_scalar_mul_def poly_scalar_mul_contract_def
   by (rule iterator_map_spec)
 
 section\<open>Filter non-zero coefficients\<close>
 
-text\<open>Collects non-zero coefficients using @{const iterator_filter_func}.
+text\<open>Collects non-zero coefficients using @{const iterator_filter}.
 This pattern is useful for sparse polynomial representations and
 for extracting non-trivial terms during NTT computations.\<close>
 
@@ -151,15 +151,15 @@ lemma nonzero_pred_rust_satisfies_lift:
 definition poly_filter_nonzero :: \<open>16 word list \<Rightarrow>
     ('s, 16 word list, 'abort, 'i prompt, 'o prompt_output) function_body\<close> where
   \<open>poly_filter_nonzero coeffs \<equiv>
-    iterator_filter_func (make_iterator_from_list coeffs) nonzero_pred_rust\<close>
+    iterator_filter (make_iterator_from_list coeffs) nonzero_pred_rust\<close>
 
 definition poly_filter_nonzero_contract where
-  [crush_contracts]: \<open>poly_filter_nonzero_contract coeffs \<equiv>
+  [crush_contracts]: \<open>poly_filter_nonzero_contract coeffs \<Gamma> \<equiv>
     iterator_filter_contract coeffs (\<lambda>x. x \<noteq> 0) \<Gamma> nonzero_pred_rust\<close>
 ucincl_auto poly_filter_nonzero_contract
 
 lemma poly_filter_nonzero_spec [crush_specs]:
-  shows \<open>\<Gamma>; poly_filter_nonzero coeffs \<Turnstile>\<^sub>F poly_filter_nonzero_contract coeffs\<close>
+  shows \<open>\<Gamma>; poly_filter_nonzero coeffs \<Turnstile>\<^sub>F poly_filter_nonzero_contract coeffs \<Gamma>\<close>
   unfolding poly_filter_nonzero_def poly_filter_nonzero_contract_def
   by (rule iterator_filter_spec)
 
@@ -197,12 +197,12 @@ definition poly_find_above_threshold :: \<open>16 word \<Rightarrow> 16 word lis
     StdLib_Iterators.find (make_iterator_from_list coeffs) (above_threshold_pred_rust thresh)\<close>
 
 definition poly_find_above_threshold_contract where
-  [crush_contracts]: \<open>poly_find_above_threshold_contract thresh coeffs \<equiv>
+  [crush_contracts]: \<open>poly_find_above_threshold_contract thresh coeffs \<Gamma> \<equiv>
     iterator_find_contract coeffs (\<lambda>x. thresh < x) \<Gamma> (above_threshold_pred_rust thresh)\<close>
 ucincl_auto poly_find_above_threshold_contract
 
 lemma poly_find_above_threshold_spec [crush_specs]:
-  shows \<open>\<Gamma>; poly_find_above_threshold thresh coeffs \<Turnstile>\<^sub>F poly_find_above_threshold_contract thresh coeffs\<close>
+  shows \<open>\<Gamma>; poly_find_above_threshold thresh coeffs \<Turnstile>\<^sub>F poly_find_above_threshold_contract thresh coeffs \<Gamma>\<close>
   unfolding poly_find_above_threshold_def poly_find_above_threshold_contract_def
   by (rule iterator_find_spec)
 
@@ -218,8 +218,10 @@ definition poly_scalar_dot_pure :: \<open>16 word \<Rightarrow> 16 word list \<R
 definition poly_scalar_dot :: \<open>16 word \<Rightarrow> 16 word list \<Rightarrow>
     ('s, 16 word, 'abort, 'i prompt, 'o prompt_output) function_body\<close> where
   \<open>poly_scalar_dot c coeffs \<equiv> FunctionBody \<lbrakk>
-    let scaled = \<llangle>iterator_map (make_iterator_from_list coeffs) (zq_scalar_mul_rust c)\<rrangle>;
-    \<llangle>iterator_fold_func (make_iterator_from_list scaled) 0 zq_add_rust\<rrangle>
+    let it = make_iterator_from_list coeffs;
+    let scaled = it.map_std(zq_scalar_mul_rust c);
+    let it2 = make_iterator_from_list scaled;
+    it2.fold(0, zq_add_rust)
   \<rbrakk>\<close>
 
 definition poly_scalar_dot_contract where
@@ -249,7 +251,7 @@ definition poly_count_nonzero_pure :: \<open>16 word list \<Rightarrow> nat\<clo
 definition poly_count_nonzero :: \<open>16 word list \<Rightarrow>
     ('s, nat, 'abort, 'i prompt, 'o prompt_output) function_body\<close> where
   \<open>poly_count_nonzero coeffs \<equiv> FunctionBody \<lbrakk>
-    let nonzeros = \<llangle>iterator_filter_func (make_iterator_from_list coeffs) nonzero_pred_rust\<rrangle>;
+    let nonzeros = \<llangle>iterator_filter (make_iterator_from_list coeffs) nonzero_pred_rust\<rrangle>;
     \<llangle>length nonzeros\<rrangle>
   \<rbrakk>\<close>
 

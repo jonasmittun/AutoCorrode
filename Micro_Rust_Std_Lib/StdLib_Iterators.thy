@@ -45,7 +45,6 @@ definition count :: \<open>('s, 'v, 'abort, 'i prompt, 'o prompt_output) iterato
     \<llangle>of_nat \<circ> length \<circ> iterator_thunks\<rrangle>\<^sub>1(self)
    \<rbrakk>\<close>
 
-
 context reference
 begin
 
@@ -79,7 +78,74 @@ end
 declare lift_pure_to_contract_def [crush_contracts]
 ucincl_auto lift_pure_to_contract
 
-subsection\<open>Iterator fold\<close>
+definition iterator_find_contract :: \<open>'a list \<Rightarrow> ('a \<Rightarrow> bool) \<Rightarrow>
+  ('machine::sepalg, 'abort, 'i, 'o) striple_context \<Rightarrow>
+  ('a \<Rightarrow> ('machine, bool, 'abort, 'i prompt, 'o prompt_output) function_body) \<Rightarrow>
+  ('machine, 'a option, 'abort) function_contract\<close> where
+  \<open>iterator_find_contract vs pred_pure \<Gamma> pred_rust \<equiv>
+    let pre = \<langle>\<forall> i. \<Gamma>; pred_rust i \<Turnstile>\<^sub>F lift_pure_to_contract (pred_pure i)\<rangle> in
+    let post = \<lambda> ret. \<langle>ret = List.find pred_pure vs\<rangle> in
+    make_function_contract pre post\<close>
+ucincl_auto iterator_find_contract
+
+lemma iterator_find_spec:
+  shows \<open>\<Gamma> ; StdLib_Iterators.find (make_iterator_from_list vs) pred_rust \<Turnstile>\<^sub>F iterator_find_contract vs pred_pure \<Gamma> pred_rust\<close>
+proof (crush_boot f: StdLib_Iterators.find_def contract: iterator_find_contract_def, goal_cases)
+  case 1
+  note pred_spec = this[THEN spec]
+  show ?case proof (crush_base inline: iterator_into_iter_def, induction vs)
+    case Nil
+    then show ?case
+      by (crush_base simp add: raw_for_loop_def)
+  next
+    case (Cons a vs)
+    note IH = this
+    show ?case
+      apply (crush_base specs add: pred_spec)
+      apply (cases \<open>pred_pure a\<close>)
+       apply crush_base
+      apply (subst List.find.simps(2), simp)
+      by (rule IH)
+  qed
+qed
+
+definition iterator_any_contract where
+  \<open>iterator_any_contract vs pred_pure \<Gamma> pred_rust \<equiv>
+    let pre = \<langle>\<forall> i. \<Gamma>; pred_rust i  \<Turnstile>\<^sub>F lift_pure_to_contract (pred_pure i)\<rangle> in
+    let post = \<lambda> ret. \<langle>ret = (List.find pred_pure vs \<noteq> None)\<rangle> in
+    make_function_contract pre post\<close>
+ucincl_auto iterator_any_contract
+
+lemma iterator_any_spec:
+  shows \<open>\<Gamma> ; any (make_iterator_from_list vs) pred_rust  \<Turnstile>\<^sub>F iterator_any_contract vs pred_pure \<Gamma> pred_rust\<close>
+proof (crush_boot f: any_def contract: iterator_any_contract_def, goal_cases)
+  case 1
+  have pred_spec: \<open>\<And>i. \<Gamma> ; pred_rust i \<Turnstile>\<^sub>F lift_pure_to_contract (pred_pure i)\<close>
+    using 1 by auto
+  have find_spec: \<open>\<Gamma> ; StdLib_Iterators.find (make_iterator_from_list vs) pred_rust
+       \<Turnstile>\<^sub>F iterator_find_contract vs pred_pure \<Gamma> pred_rust\<close>
+    using iterator_find_spec .
+  show ?case
+    apply (crush_base
+             specs add: find_spec
+             contracts add: iterator_find_contract_def)
+      apply (cases \<open>List.find pred_pure vs\<close>)
+      apply crush_base
+     apply (rule pred_spec[unfolded lift_pure_to_contract_def Let_def])
+    done
+qed
+
+definition iterator_count_contract :: \<open>'v list \<Rightarrow> ('machine::sepalg, 64 word, 'abort) function_contract\<close> where
+  \<open>iterator_count_contract vs \<equiv> make_function_contract \<langle>True\<rangle> (\<lambda> ret. \<langle>ret = of_nat (length vs)\<rangle>)\<close>
+ucincl_auto iterator_count_contract
+
+lemma iterator_count_spec:
+  shows \<open>\<Gamma> ; count (make_iterator_from_list vs) \<Turnstile>\<^sub>F iterator_count_contract vs\<close>
+proof (crush_boot f: count_def contract: iterator_count_contract_def, goal_cases)
+  case 1
+  show ?case
+    by (crush_base simp add: make_iterator_from_list_def iterator_thunks_def)
+qed
 
 text\<open>Recursive helper: fold over a list of thunks with an accumulator.\<close>
 fun fold_thunks ::
@@ -94,13 +160,13 @@ fun fold_thunks ::
       bind (call (f init val_a)) (\<lambda>new_acc.
         fold_thunks thunks new_acc f))\<close>
 
-definition iterator_fold_func ::
+definition iterator_fold ::
   \<open>('s, 'a, 'abort, 'i prompt, 'o prompt_output) iterator \<Rightarrow>
    'b \<Rightarrow>
    ('b \<Rightarrow> 'a \<Rightarrow> ('s, 'b, 'abort, 'i prompt, 'o prompt_output) function_body) \<Rightarrow>
    ('s, 'b, 'abort, 'i prompt, 'o prompt_output) function_body\<close>
   where
-  \<open>iterator_fold_func self init f \<equiv> FunctionBody (
+  \<open>iterator_fold self init f \<equiv> FunctionBody (
     fold_thunks (iterator_ethunks self) init f)\<close>
 
 definition iterator_fold_contract where
@@ -111,8 +177,8 @@ definition iterator_fold_contract where
 ucincl_auto iterator_fold_contract
 
 lemma iterator_fold_spec:
-  shows \<open>\<Gamma> ; iterator_fold_func (make_iterator_from_list vs) init f_rust \<Turnstile>\<^sub>F iterator_fold_contract vs init f_pure \<Gamma> f_rust\<close>
-proof (crush_boot f: iterator_fold_func_def contract: iterator_fold_contract_def, goal_cases)
+  shows \<open>\<Gamma> ; iterator_fold (make_iterator_from_list vs) init f_rust \<Turnstile>\<^sub>F iterator_fold_contract vs init f_pure \<Gamma> f_rust\<close>
+proof (crush_boot f: iterator_fold_def contract: iterator_fold_contract_def, goal_cases)
   case 1
   note f_spec = this[THEN spec, THEN spec]
   show ?case proof (induct vs arbitrary: init)
@@ -129,7 +195,7 @@ proof (crush_boot f: iterator_fold_func_def contract: iterator_fold_contract_def
   qed
 qed
 
-subsection\<open>Iterator map\<close>
+micro_rust_notation (call) iterator_fold ("fold")
 
 fun map_thunks ::
   \<open>('s, 'a, 'r, 'abort, 'i prompt, 'o prompt_output) expression list \<Rightarrow>
@@ -191,7 +257,7 @@ proof (crush_boot f: iterator_map_def contract: iterator_map_contract_def, goal_
                    wp intro add: wp)
 qed
 
-subsection\<open>Iterator filter\<close>
+micro_rust_notation (call) iterator_map ("map_std")
 
 fun filter_thunks ::
   \<open>('s, 'a, 'r, 'abort, 'i prompt, 'o prompt_output) expression list \<Rightarrow>
@@ -205,12 +271,12 @@ fun filter_thunks ::
       bind (call (pred val_a)) (\<lambda>keep.
         filter_thunks thunks pred (if keep then acc @ [val_a] else acc)))\<close>
 
-definition iterator_filter_func ::
+definition iterator_filter ::
   \<open>('s, 'a, 'abort, 'i prompt, 'o prompt_output) iterator \<Rightarrow>
    ('a \<Rightarrow> ('s, bool, 'abort, 'i prompt, 'o prompt_output) function_body) \<Rightarrow>
    ('s, 'a list, 'abort, 'i prompt, 'o prompt_output) function_body\<close>
   where
-  \<open>iterator_filter_func self pred \<equiv> FunctionBody (
+  \<open>iterator_filter self pred \<equiv> FunctionBody (
     filter_thunks (iterator_ethunks self) pred [])\<close>
 
 definition iterator_filter_contract where
@@ -249,8 +315,8 @@ next
 qed
 
 lemma iterator_filter_spec:
-  shows \<open>\<Gamma> ; iterator_filter_func (make_iterator_from_list vs) pred_rust \<Turnstile>\<^sub>F iterator_filter_contract vs pred_pure \<Gamma> pred_rust\<close>
-proof (crush_boot f: iterator_filter_func_def contract: iterator_filter_contract_def, goal_cases)
+  shows \<open>\<Gamma> ; iterator_filter (make_iterator_from_list vs) pred_rust \<Turnstile>\<^sub>F iterator_filter_contract vs pred_pure \<Gamma> pred_rust\<close>
+proof (crush_boot f: iterator_filter_def contract: iterator_filter_contract_def, goal_cases)
   case 1
   note pred_spec = this[THEN spec]
   have wp: \<open>UNIV \<longlongrightarrow> \<W>\<P> \<Gamma> (filter_thunks (List.map literal vs) pred_rust [])
@@ -262,38 +328,7 @@ proof (crush_boot f: iterator_filter_func_def contract: iterator_filter_contract
                    wp intro add: wp)
 qed
 
-subsection\<open>Find contract and spec\<close>
-
-definition iterator_find_contract :: \<open>'a list \<Rightarrow> ('a \<Rightarrow> bool) \<Rightarrow>
-  ('machine::sepalg, 'abort, 'i, 'o) striple_context \<Rightarrow>
-  ('a \<Rightarrow> ('machine, bool, 'abort, 'i prompt, 'o prompt_output) function_body) \<Rightarrow>
-  ('machine, 'a option, 'abort) function_contract\<close> where
-  \<open>iterator_find_contract vs pred_pure \<Gamma> pred_rust \<equiv>
-    let pre = \<langle>\<forall> i. \<Gamma>; pred_rust i \<Turnstile>\<^sub>F lift_pure_to_contract (pred_pure i)\<rangle> in
-    let post = \<lambda> ret. \<langle>ret = List.find pred_pure vs\<rangle> in
-    make_function_contract pre post\<close>
-ucincl_auto iterator_find_contract
-
-lemma iterator_find_spec:
-  shows \<open>\<Gamma> ; StdLib_Iterators.find (make_iterator_from_list vs) pred_rust \<Turnstile>\<^sub>F iterator_find_contract vs pred_pure \<Gamma> pred_rust\<close>
-proof (crush_boot f: StdLib_Iterators.find_def contract: iterator_find_contract_def, goal_cases)
-  case 1
-  note pred_spec = this[THEN spec]
-  show ?case proof (crush_base inline: iterator_into_iter_def, induction vs)
-    case Nil
-    then show ?case
-      by (crush_base simp add: raw_for_loop_def)
-  next
-    case (Cons a vs)
-    note IH = this
-    show ?case
-      apply (crush_base specs add: pred_spec)
-      apply (cases \<open>pred_pure a\<close>)
-       apply crush_base
-      apply (subst List.find.simps(2), simp)
-      by (rule IH)
-  qed
-qed
+micro_rust_notation (call) iterator_filter ("filter_std")
 
 (*<*)
 end
